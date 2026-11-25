@@ -19,6 +19,7 @@ import {
   normalizeArguments,
   normalizeMessages,
   normalizeTools,
+  cleanupUpstreamText,
   parseClientToolCalls,
   parseToolChoice,
   planTurns,
@@ -229,7 +230,8 @@ export class QuickProxy {
       return;
     }
 
-    const key = this.conversationKey(req, instructions, messages);
+    const toolsHash = sha256Hex(JSON.stringify(tools));
+    const key = this.conversationKey(req, messages);
     const abort = new AbortController();
     res.on('close', () => {
       if (!res.writableEnded) abort.abort();
@@ -266,7 +268,7 @@ export class QuickProxy {
       }, 15_000);
       keepalive.unref?.();
       try {
-        const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, abort: abort.signal });
+        const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, toolsHash, abort: abort.signal });
         this.writeMessage(res, result, { stream: true, responseModel, messageId });
         log(
           this.logger,
@@ -289,7 +291,7 @@ export class QuickProxy {
     }
 
     try {
-      const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, abort: abort.signal });
+      const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, toolsHash, abort: abort.signal });
       log(
         this.logger,
         'info',
@@ -379,27 +381,33 @@ export class QuickProxy {
     writeSse(res, 'message_stop', { type: 'message_stop' });
   }
 
-  conversationKey(req, instructions, messages) {
+  conversationKey(req, messages) {
     for (const header of ['x-conversation-id', 'x-thread-id', 'x-claude-code-session-id']) {
       const id = String(req.headers[header] || '').trim();
       if (id) return `h:${header}:${id}`;
     }
     const firstUser = messages.find((m) => m.role === 'user');
     const firstText = firstUser ? firstUser.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n') : '';
-    return `c:${sha256Hex([req.headers.authorization || '', instructions, firstText].join('\0'))}`;
+    // Keep the key stable when only the dynamic system prompt changes.
+    return `c:${sha256Hex([req.headers.authorization || '', firstText].join('\0'))}`;
   }
 
-  async runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model, title, allowed, choice, tools, abort }) {
+  async runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model, title, allowed, choice, tools, toolsHash, abort }) {
     const { entry, release } = await this.conversations.lock(key);
     try {
       const maxAttempts = Math.max(1, Number(this.cfg.max_attempts) || 1);
       const excluded = new Set();
       const refreshed = new Set();
+      // Only a tool-set change forces a new upstream thread. Claude Code's
+      // system prompt contains dynamic text that changes between turns; using
+      // it as part of the resume test created a new Quick conversation per
+      // request.
+      const sameTools = !entry.toolsHash || entry.toolsHash === toolsHash;
       let resume = Boolean(
         this.cfg.session_reuse &&
           entry.threadId &&
           entry.accountId &&
-          entry.instructionsHash === instructionsHash &&
+          sameTools &&
           isPrefix(entry.messages, messages),
       );
       let lastErr = null;
@@ -492,6 +500,7 @@ export class QuickProxy {
               deleteSession: !this.cfg.session_reuse && !this.cfg.keep_sessions,
               timeoutMs: this.cfg.request_timeout_ms,
               allowedTools: allowed,
+              deleteSessionOnError: true,
             },
             { signal: abort },
           );
@@ -506,6 +515,7 @@ export class QuickProxy {
             entry.accountId = account.id;
             entry.messages = JSON.parse(JSON.stringify(messages));
             entry.instructionsHash = instructionsHash;
+            entry.toolsHash = toolsHash;
             entry.updatedAt = Date.now();
           } else {
             // A native tool call leaves the upstream turn waiting for a result;
@@ -548,7 +558,7 @@ export class QuickProxy {
   }
 
   finalizeOutput(result, allowed, choice) {
-    let text = result.text || '';
+    let text = cleanupUpstreamText(result.text || '');
     let calls = [];
     let native = Boolean(result.native);
     if (allowed.size > 0) {

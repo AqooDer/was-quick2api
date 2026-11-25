@@ -320,6 +320,7 @@ export class Upstream {
     const conn = await this.connect(account);
     const deadline = Date.now() + (input.timeoutMs || this.cfg.request_timeout_ms || 600_000);
     let pingTimer = null;
+    let failed = false;
 
     try {
       if (signal?.aborted) throw new UpstreamError('request aborted');
@@ -381,7 +382,17 @@ export class Upstream {
         }
       }
       return { ...last, threadId };
+    } catch (err) {
+      failed = true;
+      throw err;
     } finally {
+      if (failed && input.deleteSessionOnError && input.createSession) {
+        try {
+          conn.sendObject({ type: 'session_delete', payload: { session_id: threadId } });
+        } catch {
+          // connection already closed
+        }
+      }
       if (pingTimer) clearInterval(pingTimer);
       conn.close();
     }

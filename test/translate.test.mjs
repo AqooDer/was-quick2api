@@ -7,6 +7,7 @@ import {
   groupToolDefinitions,
   limitToolCalls,
   buildResumeReminder,
+  cleanupUpstreamText,
   neutralizeSystemPrompt,
   normalizeMessages,
   normalizeTools,
@@ -189,4 +190,16 @@ test('resume reminder restates the tool contract', () => {
   assert.match(reminder, /client runs on the caller's machine/);
   assert.match(reminder, /<client_tool_call>/);
   assert.match(reminder, /Bash, Read/);
+});
+
+test('Quick decision blocks become readable text', () => {
+  const raw = `<decision question="你想怎么继续？">
+<option description="在 Mac 的 Claude Code 里直接继续">回 Claude Code 继续</option>
+<option description="在 Mac 上用 Quick 改">在 Mac 上用 Quick 改</option>
+</decision>`;
+  const clean = cleanupUpstreamText(raw);
+  assert.match(clean, /你想怎么继续/);
+  assert.match(clean, /回 Claude Code 继续/);
+  assert.match(clean, /在 Mac 上用 Quick 改/);
+  assert.doesNotMatch(clean, /<decision|<option/);
 });

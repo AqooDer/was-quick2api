@@ -163,6 +163,43 @@ test('streams a client tool call and resumes the thread for its result', async (
   }
 });
 
+test('reuses the upstream thread when only the system prompt changes', async () => {
+  const stack = await startStack({ toolCall: null });
+  try {
+    const first = await postMessages(stack.port, {
+      model: 'claude-sonnet-4-5',
+      max_tokens: 256,
+      stream: true,
+      system: 'SYSTEM A',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: TOOLS,
+    });
+    assert.equal(first.status, 200, first.text);
+    const before = stack.mock.userMessages.length;
+
+    const second = await postMessages(stack.port, {
+      model: 'claude-sonnet-4-5',
+      max_tokens: 256,
+      stream: true,
+      system: 'SYSTEM A with a dynamic date 2026-11-25',
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'MOCK_OK' },
+        { role: 'user', content: 'continue' },
+      ],
+      tools: TOOLS,
+    });
+    assert.equal(second.status, 200, second.text);
+    assert.equal(stack.mock.userMessages.length, before + 1, 'system-only change must resume');
+    const delta = stack.mock.userMessages.at(-1);
+    assert.match(delta, /continue/);
+    assert.doesNotMatch(delta, /dynamic date/);
+    assert.match(delta, /Relay contract reminder/);
+  } finally {
+    await stack.close();
+  }
+});
+
 test('maps a native upstream tool call and ends the waiting turn', async () => {
   const stack = await startStack({
     behavior: () => ({ nativeTools: [{ id: 'native-1', name: 'bash', arguments: { command: 'pwd' } }] }),

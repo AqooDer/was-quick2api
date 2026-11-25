@@ -412,6 +412,33 @@ function planOversized(body, limit, chunk, withPrefix) {
   return turns;
 }
 
+/**
+ * Quick's desktop agent sometimes emits its own UI markup:
+ *   <decision question="..."><option description="...">label</option>...</decision>
+ * It is not a native tool call; render it as plain text for Claude Code.
+ */
+export function cleanupUpstreamText(text) {
+  const decode = (s) => String(s || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim();
+  return String(text || '')
+    .replace(/<decision\b([^>]*)>([\s\S]*?)<\/decision>/gi, (_, attrs, body) => {
+      const question = decode((/question\s*=\s*"([^"]*)"/i.exec(attrs) || [])[1] || '');
+      const options = [...String(body).matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)].map((m) => {
+        const label = decode(String(m[2]).replace(/<[^>]+>/g, ''));
+        const description = decode((/description\s*=\s*"([^"]*)"/i.exec(m[1]) || [])[1] || '');
+        return label || description ? `- ${label || description}${label && description ? ` — ${description}` : ''}` : '';
+      }).filter(Boolean);
+      return [question, ...options].filter(Boolean).join('\n');
+    })
+    .replace(/<decision\b[^>]*\/>/gi, '')
+    .trim();
+}
+
 // ---------------------------------------------------------------------------
 // Client tool-call parsing
 // ---------------------------------------------------------------------------

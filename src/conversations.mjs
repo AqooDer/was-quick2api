@@ -30,6 +30,7 @@ export class ConversationStore {
         accountId: '',
         messages: [],
         instructionsHash: '',
+        toolsHash: '',
         updatedAt: Date.now(),
         chain: Promise.resolve(),
       };
@@ -50,6 +51,7 @@ export class ConversationStore {
     entry.accountId = '';
     entry.messages = [];
     entry.instructionsHash = '';
+    entry.toolsHash = '';
   }
 
   /** Serialize requests for one conversation without blocking unrelated ones. */
