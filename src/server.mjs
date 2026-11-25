@@ -531,6 +531,9 @@ export class QuickProxy {
           if (parsed.refused) {
             throw new UpstreamError('upstream refused to call the client tools', { code: 'tool_refusal' });
           }
+          if (parsed.malformed) {
+            throw new UpstreamError('upstream emitted an unparsable tool call', { code: 'malformed_tool_call' });
+          }
           if (!hasVisibleText(parsed.text) && parsed.toolCalls.length === 0) {
             throw new UpstreamError(`upstream returned an empty response (completion_tokens=${result.usage.completionTokens})`, { code: 'empty_response' });
           }
@@ -596,7 +599,8 @@ export class QuickProxy {
       calls = limitToolCalls(calls, choice);
     }
     const refused = allowed.size > 0 && calls.length === 0 && looksLikeToolRefusal(text);
-    return { text, toolCalls: calls, native, refused };
+    const malformed = allowed.size > 0 && calls.length === 0 && /<(?:client_tool_call|tool_call|function_call)>/i.test(text);
+    return { text, toolCalls: calls, native, refused, malformed };
   }
 
   async refreshIfNeeded(account, force = false) {
@@ -690,7 +694,7 @@ function errorType(err) {
 function isRetryable(err) {
   if (!err) return false;
   if (err.name === 'ClientError') return false;
-  if (err.code === 'empty_response' || err.code === 'tool_refusal') return true;
+  if (err.code === 'empty_response' || err.code === 'tool_refusal' || err.code === 'malformed_tool_call') return true;
   if (err.code === 'timeout') return true;
   if (!err.status) return true;
   return err.status === 401 || err.status === 403 || err.status === 408 || err.status === 429 || err.status >= 500;

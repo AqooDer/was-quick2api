@@ -508,7 +508,9 @@ export function sanitizeUpstreamMessages(messages) {
     if (m?.role !== 'assistant') return true;
     if ((m.content || []).some((b) => b.type === 'tool_use')) return true;
     const text = (m.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-    return !looksLikeToolRefusal(text);
+    if (looksLikeToolRefusal(text)) return false;
+    // Do not replay an unparsed raw marker as an example either.
+    return !/<(?:client_tool_call|tool_call|function_call)>/i.test(text);
   });
 }
 
@@ -613,16 +615,47 @@ function repairJsonControls(text) {
   return out;
 }
 
-function parseLooseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    try {
-      return JSON.parse(repairJsonControls(text));
-    } catch {
-      return null;
+/** Append missing closing braces/brackets caused by a truncated final JSON
+ * value (models often forget the outer `}` after `arguments`). */
+function balanceJson(text) {
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of String(text)) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{' || ch === '[') {
+      stack.push(ch);
+    } else if (ch === '}' || ch === ']') {
+      if (stack.length > 0) stack.pop();
     }
   }
+  let out = String(text);
+  if (inString) out += '"';
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']';
+  return out;
+}
+
+function parseLooseJson(text) {
+  const candidates = [text, repairJsonControls(text)];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      try {
+        return JSON.parse(balanceJson(candidate));
+      } catch {
+        // try the next repair strategy
+      }
+    }
+  }
+  return null;
 }
 
 function parseToolEnvelopes(payload) {

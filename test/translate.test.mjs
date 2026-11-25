@@ -268,3 +268,11 @@ test('required-action suffix is the last thing the model reads', () => {
   });
   assert.match(turns.at(-1), /do it[\s\S]*Required action/);
 });
+
+test('repairs a tool call missing the final root brace', () => {
+  const raw = '<client_tool_call>{"name":"Bash","arguments":{"command":"echo hi","description":"x"}</client_tool_call>';
+  const parsed = parseClientToolCalls(raw, new Set(['Bash']));
+  assert.equal(parsed.calls.length, 1);
+  assert.equal(JSON.parse(parsed.calls[0].arguments).command, 'echo hi');
+  assert.equal(parsed.text, '');
+});
