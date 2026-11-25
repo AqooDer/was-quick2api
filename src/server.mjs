@@ -525,7 +525,7 @@ export class QuickProxy {
             throw new UpstreamError(`upstream returned an empty response (completion_tokens=${result.usage.completionTokens})`, { code: 'empty_response' });
           }
 
-          if (!auxiliary && this.cfg.session_reuse && result.threadId && !parsed.native) {
+          if (!auxiliary && this.cfg.session_reuse && result.threadId) {
             entry.threadId = result.threadId;
             entry.accountId = account.id;
             entry.messages = JSON.parse(JSON.stringify(messages));
@@ -533,8 +533,6 @@ export class QuickProxy {
             entry.toolsHash = toolsHash;
             entry.updatedAt = Date.now();
           } else {
-            // A native tool call leaves the upstream turn waiting for a result;
-            // start a fresh thread with the tool result on the next request.
             this.conversations.reset(entry);
           }
           return { ...parsed, usage: result.usage, account, threadId: result.threadId };

@@ -215,3 +215,18 @@ test('extracts base64 image blocks for upload', async () => {
   assert.equal(images[0].mediaType, 'image/png');
   assert.equal(images[0].bytes.toString(), 'abc');
 });
+
+test('extracts images nested in tool_result content', async () => {
+  const images = await collectImages([
+    { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 't1', content: [
+        { type: 'text', text: 'read image' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: Buffer.from('xyz').toString('base64') } },
+      ] },
+    ] },
+  ]);
+  assert.equal(images.length, 1);
+  assert.equal(images[0].name, 'image-1.jpg');
+  assert.equal(images[0].mediaType, 'image/jpeg');
+  assert.equal(images[0].bytes.toString(), 'xyz');
+});

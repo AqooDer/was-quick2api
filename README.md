@@ -385,6 +385,26 @@ QUICK2API_LOG=debug node bin/quick2api.mjs serve
 
 **不想在 Quick 聊天列表看到 setup 轮**：目前无法完全避免；可关闭 `session_reuse` 之外的选项没有帮助。每个新会话都会预热一次。
 
+## 12.1 在 Claude Code 里发图片
+
+支持两种方式：
+
+1. **直接粘贴 / 拖拽图片** 到 Claude Code：图片会作为 user message 的 image block 发来。
+2. **让 Claude Code 用 Read 工具读取图片绝对路径**：
+
+   ```text
+   请用 Read 工具读取 /private/tmp/.../17.png 和 /private/tmp/.../18.png，
+   然后根据图片内容继续改代码。
+   ```
+
+代理会把 user message 以及 `Read` 返回的 `tool_result` 里的图片都上传到 Quick，再附到本轮 `user_message.attachments`。
+
+注意：
+
+- 只说 `file:///private/tmp/.../17.png` 不保证被当成图片附件；Claude Code 可能只把它当普通文本。优先用绝对路径 + 明确要求 Read，或直接粘贴图片。
+- 每轮最多 8 张；DLP 扫描会让首轮多等几秒。
+- 旧消息里的 `[image]` 占位不会自动补图，需要在新的消息里重新附上。
+
 ## 13. 限制
 
 - 图片会通过 Quick 的 `upload-attachment → attachment-dlp-status → files/upload` 上传，模型可以真正看到截图；每轮最多 8 张，DLP 扫描会让首轮多等几秒

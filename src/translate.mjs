@@ -125,34 +125,47 @@ export function normalizeMessages(messages) {
 /** Extract image bytes from Anthropic messages for out-of-band upload. */
 export async function collectImages(messages, { max = 8 } = {}) {
   const out = [];
-  for (const message of Array.isArray(messages) ? messages : []) {
-    if (String(message?.role || '').toLowerCase() !== 'user' || !Array.isArray(message.content)) continue;
-    for (const block of message.content) {
-      if (block?.type !== 'image' || out.length >= max) continue;
-      const source = block.source || {};
-      let bytes = null;
-      let mediaType = source.media_type || 'image/png';
-      if (source.type === 'base64' && typeof source.data === 'string') {
-        bytes = Buffer.from(source.data, 'base64');
-      } else if (source.type === 'url' && typeof source.url === 'string') {
-        const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(source.url);
-        if (dataUrl) {
-          mediaType = dataUrl[1];
-          bytes = Buffer.from(dataUrl[2], 'base64');
-        } else if (/^https?:\/\//.test(source.url)) {
-          const res = await fetch(source.url, { signal: AbortSignal.timeout(30_000) });
-          if (res.ok) {
-            bytes = Buffer.from(await res.arrayBuffer());
-            mediaType = res.headers.get('content-type')?.split(';')[0] || mediaType;
-          }
+  const addImage = async (block) => {
+    if (out.length >= max) return;
+    const source = block?.source || {};
+    let bytes = null;
+    let mediaType = source.media_type || 'image/png';
+    if (source.type === 'base64' && typeof source.data === 'string') {
+      bytes = Buffer.from(source.data, 'base64');
+    } else if (source.type === 'url' && typeof source.url === 'string') {
+      const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(source.url);
+      if (dataUrl) {
+        mediaType = dataUrl[1];
+        bytes = Buffer.from(dataUrl[2], 'base64');
+      } else if (/^https?:\/\//.test(source.url)) {
+        const res = await fetch(source.url, { signal: AbortSignal.timeout(30_000) });
+        if (res.ok) {
+          bytes = Buffer.from(await res.arrayBuffer());
+          mediaType = res.headers.get('content-type')?.split(';')[0] || mediaType;
         }
-      } else if (typeof block.data === 'string') {
-        bytes = Buffer.from(block.data, 'base64');
       }
-      if (!bytes || bytes.length === 0) continue;
-      const ext = mediaType.includes('jpeg') ? 'jpg' : mediaType.includes('webp') ? 'webp' : mediaType.includes('gif') ? 'gif' : 'png';
-      out.push({ bytes, mediaType, name: `image-${out.length + 1}.${ext}` });
+    } else if (typeof block?.data === 'string') {
+      bytes = Buffer.from(block.data, 'base64');
     }
+    if (!bytes || bytes.length === 0) return;
+    const ext = mediaType.includes('jpeg') ? 'jpg' : mediaType.includes('webp') ? 'webp' : mediaType.includes('gif') ? 'gif' : 'png';
+    out.push({ bytes, mediaType, name: `image-${out.length + 1}.${ext}` });
+  };
+  const walk = async (blocks) => {
+    if (!Array.isArray(blocks)) return;
+    for (const block of blocks) {
+      if (out.length >= max) return;
+      if (block?.type === 'image') {
+        await addImage(block);
+      } else if (block?.type === 'tool_result' && Array.isArray(block.content)) {
+        // Claude Code's Read tool returns images here, not at the top level.
+        await walk(block.content);
+      }
+    }
+  };
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (String(message?.role || '').toLowerCase() !== 'user') continue;
+    await walk(message.content);
   }
   return out;
 }
