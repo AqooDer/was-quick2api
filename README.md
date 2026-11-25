@@ -387,8 +387,9 @@ QUICK2API_LOG=debug node bin/quick2api.mjs serve
 
 ## 13. 限制
 
-- 只支持文本与工具调用；图片 / PDF 仅以 `[image]` / `[document]` 占位，不会上传
-- 不使用 Quick 的附件上传 / DLP 流程（参考项目有）
+- 图片会通过 Quick 的 `upload-attachment → attachment-dlp-status → files/upload` 上传，模型可以真正看到截图；每轮最多 8 张，DLP 扫描会让首轮多等几秒
+- PDF / 文档仍只以 `[document]` 占位，不会上传
+- 图片上传失败时降级为 `[image]` 文本占位，不会阻断整个请求
 - 忽略 Anthropic 的 prompt caching 标记、`temperature`、`stop_sequences`、`max_tokens`
 - 每个新会话首轮的预热会额外消耗 Quick 额度
 - 上游是通用 agent，可能不严格遵循工具协议；本项目通过提示词、名称容错和原生工具事件尽量兜底
@@ -417,6 +418,7 @@ src/cbor.mjs             Gateway CBOR
 src/translate.mjs        Anthropic → 文本 prompt、工具桥、预热规划
 src/conversations.mjs    会话复用 / 增量
 src/server.mjs           /v1/messages、SSE、重试
+src/attachments.mjs      Quick 图片附件上传 / DLP / files-upload
 scripts/install-service.mjs  macOS LaunchAgent 安装/卸载
 scripts/claude-quick     用 --settings 直连 quick2api 的启动脚本
 test/                    mock 上游与测试

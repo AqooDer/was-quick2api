@@ -370,6 +370,7 @@ export class Upstream {
           deadline,
           collect: isLast,
           allowedTools: input.allowedTools,
+          attachments: isLast ? input.attachments : [],
           signal,
         });
       }
@@ -398,7 +399,7 @@ export class Upstream {
     }
   }
 
-  async runTurn(conn, { text, model, threadId, deadline, collect, allowedTools, signal }) {
+  async runTurn(conn, { text, model, threadId, deadline, collect, allowedTools, attachments, signal }) {
     const messageId = uuid();
     const traceId = uuid();
     const payload = {
@@ -423,6 +424,7 @@ export class Upstream {
       custom_prompt: null,
     };
     if (this.cfg.thinking_effort) payload.thinking_effort = this.cfg.thinking_effort;
+    if (Array.isArray(attachments) && attachments.length > 0) payload.attachments = attachments;
     fitUserMessage(payload, this.cfg.max_frame_bytes || MAX_FRAME_BYTES);
     conn.sendObject({ type: 'user_message', payload });
 

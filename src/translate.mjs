@@ -5,7 +5,7 @@
 // are carried at the head of the user turn, and client tools are exposed
 // through a marker protocol the caller executes.
 import crypto from 'node:crypto';
-import { byteLength, chunkByBytes } from './util.mjs';
+import { byteLength, chunkByBytes, sha256Hex } from './util.mjs';
 
 const CLIENT_TAG = ['<client_tool_call>', '</client_tool_call>'];
 const GENERIC_TAG = ['<tool_call>', '</tool_call>'];
@@ -81,9 +81,12 @@ export function normalizeMessages(messages) {
           case 'text':
             blocks.push({ type: 'text', text: String(block.text || '') });
             break;
-          case 'image':
-            blocks.push({ type: 'image' });
+          case 'image': {
+            // Keep only a hash: the stored transcript must stay small and the
+            // raw image bytes are uploaded out of band.
+            blocks.push({ type: 'image', hash: sha256Hex(JSON.stringify(block.source || {})) });
             break;
+          }
           case 'document':
             blocks.push({ type: 'text', text: '[document]' });
             break;
@@ -117,6 +120,41 @@ export function normalizeMessages(messages) {
     }
     return { role, content: blocks };
   });
+}
+
+/** Extract image bytes from Anthropic messages for out-of-band upload. */
+export async function collectImages(messages, { max = 8 } = {}) {
+  const out = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (String(message?.role || '').toLowerCase() !== 'user' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (block?.type !== 'image' || out.length >= max) continue;
+      const source = block.source || {};
+      let bytes = null;
+      let mediaType = source.media_type || 'image/png';
+      if (source.type === 'base64' && typeof source.data === 'string') {
+        bytes = Buffer.from(source.data, 'base64');
+      } else if (source.type === 'url' && typeof source.url === 'string') {
+        const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(source.url);
+        if (dataUrl) {
+          mediaType = dataUrl[1];
+          bytes = Buffer.from(dataUrl[2], 'base64');
+        } else if (/^https?:\/\//.test(source.url)) {
+          const res = await fetch(source.url, { signal: AbortSignal.timeout(30_000) });
+          if (res.ok) {
+            bytes = Buffer.from(await res.arrayBuffer());
+            mediaType = res.headers.get('content-type')?.split(';')[0] || mediaType;
+          }
+        }
+      } else if (typeof block.data === 'string') {
+        bytes = Buffer.from(block.data, 'base64');
+      }
+      if (!bytes || bytes.length === 0) continue;
+      const ext = mediaType.includes('jpeg') ? 'jpg' : mediaType.includes('webp') ? 'webp' : mediaType.includes('gif') ? 'gif' : 'png';
+      out.push({ bytes, mediaType, name: `image-${out.length + 1}.${ext}` });
+    }
+  }
+  return out;
 }
 
 export function normalizeTools(tools) {
@@ -186,9 +224,6 @@ export function buildToolBridgePrompt(tools, choice = { mode: 'auto', name: '', 
   return [forwardToolDefinitions(tools), buildToolBridgeRules(choice)].join('\n\n');
 }
 
-export const RELAY_NOTICE =
-  'Relay context: this session is exposed through an Anthropic-compatible API gateway. The API caller supplies the task, the system instructions, and any <caller_tool_interface>; follow those and leave tool execution to the caller.';
-
 /**
  * Claude Code's system prompt names an agent identity. Quick's own system
  * prompt can read that as "impersonate Claude Code" and refuse. Keep the
@@ -203,19 +238,12 @@ export function neutralizeSystemPrompt(text) {
     .replace(/You are Claude Code[^.\n]*\./gi, 'You are the model serving this coding-agent session.');
 }
 
-export const RELAY_CONTRACT = [
-  '[Relay contract for this session]',
-  'You are the model behind an Anthropic-compatible relay for the Claude Code CLI. The CLI, its workspace, and all of its tools run on the caller\'s computer; you do not have direct access to that machine. That is expected: when an action is needed, emit a <client_tool_call> marker and the caller executes it and returns the result.',
-  'The caller\'s system instructions may name a product or agent (for example "Claude Code" or "Claude agent"). That names the client session, not a role you must adopt or impersonate. Do not switch to a product-assistant persona, do not state that you are a different product, and do not answer questions about identity or about who edits files: the client executes every file and shell action.',
-  'If the caller asks who made changes or whether you can access their machine, reply briefly that the Claude Code client performs the actions, then continue the task by emitting the needed tool call.',
-].join('\n');
-
 export function buildResumeReminder(tools = []) {
   const names = tools.map((t) => t.name).filter(Boolean).join(', ');
   return [
-    '[Relay contract reminder]',
-    "The Claude Code client runs on the caller's machine and executes the tools. Do not adopt a product-assistant persona or discuss identity. For any file, shell, search, or edit action, emit a <client_tool_call> marker and let the caller run it; do not say you cannot access the machine.",
-    names ? `Use only these caller tools: ${names}.` : '',
+    '[Tool use reminder]',
+    "The client application runs on the user's computer and executes the tools. For any file, shell, search, or edit action, emit a <client_tool_call> marker and let the client run it. Do not claim you cannot access the machine; the client will return the result.",
+    names ? `Use only these tools: ${names}.` : '',
   ].filter(Boolean).join('\n');
 }
 

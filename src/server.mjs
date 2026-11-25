@@ -4,6 +4,7 @@ import { byteLength, safeEqual, sha256Hex, uuid } from './util.mjs';
 import { mapModel } from './config.mjs';
 import { publicAccount } from './accounts.mjs';
 import { refreshAccount } from './oauth.mjs';
+import { uploadAttachment } from './attachments.mjs';
 import { Upstream, UpstreamError } from './upstream.mjs';
 import { ConversationStore, isPrefix } from './conversations.mjs';
 import {
@@ -20,12 +21,11 @@ import {
   normalizeMessages,
   normalizeTools,
   cleanupUpstreamText,
+  collectImages,
   parseClientToolCalls,
   parseToolChoice,
   planTurns,
   splitSystemMessages,
-  RELAY_CONTRACT,
-  RELAY_NOTICE,
   neutralizeSystemPrompt,
   systemText,
   titleFor,
@@ -189,7 +189,7 @@ export class QuickProxy {
     if (body.tool_choice?.disable_parallel_tool_use === true) choice.parallel = false;
     const bridge = buildToolBridgePrompt(tools, choice);
     const rules = tools.length > 0 ? buildToolBridgeRules(choice) : '';
-    const instructions = [RELAY_CONTRACT, system, bridge, RELAY_NOTICE].filter((s) => String(s || '').trim()).join('\n\n');
+    const instructions = [system, bridge].filter((s) => String(s || '').trim()).join('\n\n');
     const instructionsHash = sha256Hex(instructions);
     // Priming sends the system prompt and each tool-schema group as complete,
     // valid JSON chunks instead of cutting one giant string mid-object.
@@ -207,14 +207,12 @@ export class QuickProxy {
       finalParts.push({ title: 'tool calling protocol', text: rules });
     }
     const finalPrefix = [
-      RELAY_CONTRACT,
-      '',
-      '[System instructions from the API caller were provided in the setup turns above. Follow them exactly for this turn.]',
-      '',
-      `[Relay note] ${RELAY_NOTICE}`,
-    ].join('\n');
+      tools.length > 0 ? 'The client application runs these tools on its computer. Use a <client_tool_call> marker for any file, shell, search, or edit action.' : '',
+      '[The session instructions were provided in the setup turns above. Follow them for this turn.]',
+    ].filter(Boolean).join('\n\n');
     const allowed = toolNameSet(tools);
     const requestedModel = String(body.model || this.cfg.default_model);
+    const auxiliary = tools.length === 0 && messages.length === 1 && /haiku/i.test(requestedModel);
     const upstreamModel = mapModel(this.cfg, requestedModel);
     const stream = body.stream === true;
     const responseModel = requestedModel || upstreamModel;
@@ -268,7 +266,7 @@ export class QuickProxy {
       }, 15_000);
       keepalive.unref?.();
       try {
-        const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, toolsHash, abort: abort.signal });
+        const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, rawMessages: split.messages, auxiliary, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, toolsHash, abort: abort.signal });
         this.writeMessage(res, result, { stream: true, responseModel, messageId });
         log(
           this.logger,
@@ -291,7 +289,7 @@ export class QuickProxy {
     }
 
     try {
-      const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, toolsHash, abort: abort.signal });
+      const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, rawMessages: split.messages, auxiliary, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, toolsHash, abort: abort.signal });
       log(
         this.logger,
         'info',
@@ -392,7 +390,7 @@ export class QuickProxy {
     return `c:${sha256Hex([req.headers.authorization || '', firstText].join('\0'))}`;
   }
 
-  async runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model, title, allowed, choice, tools, toolsHash, abort }) {
+  async runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, rawMessages, auxiliary, model, title, allowed, choice, tools, toolsHash, abort }) {
     const { entry, release } = await this.conversations.lock(key);
     try {
       const maxAttempts = Math.max(1, Number(this.cfg.max_attempts) || 1);
@@ -404,7 +402,8 @@ export class QuickProxy {
       // request.
       const sameTools = !entry.toolsHash || entry.toolsHash === toolsHash;
       let resume = Boolean(
-        this.cfg.session_reuse &&
+        !auxiliary &&
+          this.cfg.session_reuse &&
           entry.threadId &&
           entry.accountId &&
           sameTools &&
@@ -483,10 +482,24 @@ export class QuickProxy {
         }
 
         const threadId = useResume ? entry.threadId : uuid();
+        let attachments = [];
+        try {
+          const imageSource = useResume ? rawMessages.slice(entry.messages.length) : rawMessages;
+          const images = await collectImages(imageSource);
+          for (const image of images) {
+            try {
+              attachments.push(await uploadAttachment(account, { bytes: image.bytes, name: image.name, mimeType: image.mediaType, threadId, logger: (msg) => log(this.logger, 'info', msg) }));
+            } catch (err) {
+              log(this.logger, 'warn', `image upload failed thread=${threadId}: ${err.message}`);
+            }
+          }
+        } catch (err) {
+          log(this.logger, 'warn', `image extraction failed thread=${threadId}: ${err.message}`);
+        }
         log(
           this.logger,
           'info',
-          `chat attempt=${attempt}/${maxAttempts} account=${accountLabel(account)} resume=${useResume} thread=${threadId} turns=${turns.length} turn_bytes=${turns.map((t) => byteLength(t)).join(',')}`,
+          `chat attempt=${attempt}/${maxAttempts} account=${accountLabel(account)} resume=${useResume} thread=${threadId} turns=${turns.length} images=${attachments.length} turn_bytes=${turns.map((t) => byteLength(t)).join(',')}`,
         );
         try {
           const result = await this.upstream.chat(
@@ -500,6 +513,8 @@ export class QuickProxy {
               deleteSession: !this.cfg.session_reuse && !this.cfg.keep_sessions,
               timeoutMs: this.cfg.request_timeout_ms,
               allowedTools: allowed,
+              attachments,
+              deleteSession: auxiliary || (!this.cfg.session_reuse && !this.cfg.keep_sessions),
               deleteSessionOnError: true,
             },
             { signal: abort },
@@ -510,7 +525,7 @@ export class QuickProxy {
             throw new UpstreamError(`upstream returned an empty response (completion_tokens=${result.usage.completionTokens})`, { code: 'empty_response' });
           }
 
-          if (this.cfg.session_reuse && result.threadId && !parsed.native) {
+          if (!auxiliary && this.cfg.session_reuse && result.threadId && !parsed.native) {
             entry.threadId = result.threadId;
             entry.accountId = account.id;
             entry.messages = JSON.parse(JSON.stringify(messages));

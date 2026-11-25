@@ -194,7 +194,7 @@ test('reuses the upstream thread when only the system prompt changes', async () 
     const delta = stack.mock.userMessages.at(-1);
     assert.match(delta, /continue/);
     assert.doesNotMatch(delta, /dynamic date/);
-    assert.match(delta, /Relay contract reminder/);
+    assert.match(delta, /Tool use reminder/);
   } finally {
     await stack.close();
   }

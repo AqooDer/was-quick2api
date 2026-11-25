@@ -8,6 +8,7 @@ import {
   limitToolCalls,
   buildResumeReminder,
   cleanupUpstreamText,
+  collectImages,
   neutralizeSystemPrompt,
   normalizeMessages,
   normalizeTools,
@@ -16,7 +17,6 @@ import {
   planTurns,
   resolveToolName,
   splitSystemMessages,
-  RELAY_CONTRACT,
   systemText,
 } from '../src/translate.mjs';
 
@@ -182,12 +182,11 @@ test('system identity is neutralized for the upstream agent', () => {
   const neutral = neutralizeSystemPrompt("You are a Claude agent, built on Anthropic's Claude Agent SDK.\nFollow the rules.");
   assert.doesNotMatch(neutral, /built on Anthropic's Claude Agent SDK/);
   assert.match(neutral, /model serving this coding-agent session/);
-  assert.match(RELAY_CONTRACT, /<client_tool_call>/);
 });
 
 test('resume reminder restates the tool contract', () => {
   const reminder = buildResumeReminder([{ name: 'Bash' }, { name: 'Read' }]);
-  assert.match(reminder, /client runs on the caller's machine/);
+  assert.match(reminder, /client application runs on the user's computer/);
   assert.match(reminder, /<client_tool_call>/);
   assert.match(reminder, /Bash, Read/);
 });
@@ -202,4 +201,17 @@ test('Quick decision blocks become readable text', () => {
   assert.match(clean, /回 Claude Code 继续/);
   assert.match(clean, /在 Mac 上用 Quick 改/);
   assert.doesNotMatch(clean, /<decision|<option/);
+});
+
+test('extracts base64 image blocks for upload', async () => {
+  const images = await collectImages([
+    { role: 'user', content: [
+      { type: 'text', text: 'look' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('abc').toString('base64') } },
+    ] },
+  ]);
+  assert.equal(images.length, 1);
+  assert.equal(images[0].name, 'image-1.png');
+  assert.equal(images[0].mediaType, 'image/png');
+  assert.equal(images[0].bytes.toString(), 'abc');
 });
