@@ -1,0 +1,24 @@
+{
+  "name": "quick2api",
+  "version": "0.1.0",
+  "description": "Amazon Quick (QuickWork) → Anthropic Messages API proxy for Claude Code",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "quick2api": "./bin/quick2api.mjs"
+  },
+  "engines": {
+    "node": ">=22.2"
+  },
+  "scripts": {
+    "start": "node bin/quick2api.mjs serve",
+    "login": "node bin/quick2api.mjs login",
+    "test": "node --test test/wire.test.mjs test/translate.test.mjs test/oauth.test.mjs test/e2e.test.mjs test/cli.test.mjs",
+    "service:install": "node scripts/install-service.mjs install",
+    "service:status": "node scripts/install-service.mjs status",
+    "service:uninstall": "node scripts/install-service.mjs uninstall"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

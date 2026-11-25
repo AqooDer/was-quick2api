@@ -1,0 +1,30 @@
+{
+  "addr": "127.0.0.1:8080",
+  "api_keys": [],
+  "models": ["smart", "fast", "balanced", "auto"],
+  "default_model": "smart",
+  "model_map": {
+    "opus": "smart",
+    "sonnet": "smart",
+    "haiku": "fast"
+  },
+  "request_timeout": "10m",
+  "refresh_before": "10m",
+  "max_attempts": 2,
+  "app_version": "1.2.4757",
+  "surface": "QUICK_WORK_DESKTOP_WINDOWS",
+  "outpost_id": "",
+  "working_session_id": "",
+  "timezone": "Asia/Shanghai",
+  "locale": "en-US",
+  "thinking_effort": "",
+  "chat_agent_id": "",
+  "expose_native_tools": false,
+  "session_reuse": true,
+  "keep_sessions": false,
+  "session_ttl": "30m",
+  "max_frame_bytes": 63488,
+  "prime_chunk_bytes": 49152,
+  "accounts_file": "data/accounts.json",
+  "log_level": "info"
+}

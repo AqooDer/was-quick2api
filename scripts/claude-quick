@@ -1,0 +1,5 @@
+#!/bin/sh
+# Run Claude Code directly against quick2api, without touching CC Switch's
+# ~/.claude/settings.json. Generate the settings file with:
+#   node bin/quick2api.mjs settings > ~/.claude/quick2api.settings.json
+exec claude --settings "${QUICK2API_CLAUDE_SETTINGS:-$HOME/.claude/quick2api.settings.json}" "$@"
