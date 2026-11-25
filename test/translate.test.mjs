@@ -8,6 +8,9 @@ import {
   limitToolCalls,
   buildResumeReminder,
   cleanupUpstreamText,
+  looksLikeToolRefusal,
+  sanitizeUpstreamMessages,
+  TOOL_ACTION_REQUIRED,
   collectImages,
   neutralizeSystemPrompt,
   normalizeMessages,
@@ -186,9 +189,9 @@ test('system identity is neutralized for the upstream agent', () => {
 
 test('resume reminder restates the tool contract', () => {
   const reminder = buildResumeReminder([{ name: 'Bash' }, { name: 'Read' }]);
-  assert.match(reminder, /client application runs on the user's computer/);
+  assert.match(reminder, /client runs these tools on its computer/);
   assert.match(reminder, /<client_tool_call>/);
-  assert.match(reminder, /Bash, Read/);
+  assert.match(reminder, /- Bash[\s\S]*- Read/);
 });
 
 test('Quick decision blocks become readable text', () => {
@@ -240,4 +243,28 @@ line two","description":"multi-line"}}</client_tool_call>`;
   const args = JSON.parse(parsed.calls[0].arguments);
   assert.equal(args.command, 'line one\nline two');
   assert.equal(parsed.text, '');
+});
+
+test('drops prior tool-refusal assistant messages from the upstream transcript', () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: '改一下 CSS' }] },
+    { role: 'assistant', content: [{ type: 'text', text: '我无法读写你电脑上的文件，请手动修改。' }] },
+    { role: 'user', content: [{ type: 'text', text: '继续' }] },
+  ];
+  assert.equal(looksLikeToolRefusal(messages[1].content[0].text), true);
+  const clean = sanitizeUpstreamMessages(messages);
+  assert.equal(clean.length, 2);
+  assert.equal(clean.some((m) => m.role === 'assistant'), false);
+});
+
+test('required-action suffix is the last thing the model reads', () => {
+  assert.match(TOOL_ACTION_REQUIRED, /Call the appropriate tool now/);
+  const turns = planTurns({
+    instructions: 'SYSTEM',
+    transcript: 'do it',
+    suffix: TOOL_ACTION_REQUIRED,
+    maxBytes: 63_488,
+    chunkBytes: 49_152,
+  });
+  assert.match(turns.at(-1), /do it[\s\S]*Required action/);
 });

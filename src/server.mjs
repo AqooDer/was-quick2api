@@ -21,6 +21,9 @@ import {
   normalizeMessages,
   normalizeTools,
   cleanupUpstreamText,
+  looksLikeToolRefusal,
+  sanitizeUpstreamMessages,
+  TOOL_ACTION_REQUIRED,
   collectImages,
   parseClientToolCalls,
   parseToolChoice,
@@ -224,7 +227,7 @@ export class QuickProxy {
 
     let transcript;
     try {
-      transcript = formatTranscript(messages);
+      transcript = formatTranscript(sanitizeUpstreamMessages(messages));
     } catch (err) {
       sendAnthropicError(res, 400, 'invalid_request_error', err.message);
       return;
@@ -455,7 +458,7 @@ export class QuickProxy {
           const delta = messages.slice(entry.messages.length);
           let deltaText = '';
           try {
-            deltaText = formatTranscript(delta);
+            deltaText = formatTranscript(sanitizeUpstreamMessages(delta));
           } catch {
             deltaText = '';
           }
@@ -466,6 +469,7 @@ export class QuickProxy {
             turns = planTurns({
               instructions: buildResumeReminder(tools),
               transcript: deltaText,
+              suffix: tools.length > 0 ? TOOL_ACTION_REQUIRED : '',
               maxBytes: this.cfg.max_frame_bytes - 1024,
               chunkBytes: this.cfg.prime_chunk_bytes,
             });
@@ -478,6 +482,7 @@ export class QuickProxy {
             parts: instructionParts,
             finalParts,
             finalPrefix,
+            suffix: tools.length > 0 ? TOOL_ACTION_REQUIRED : '',
             maxBytes: this.cfg.max_frame_bytes - 1024,
             chunkBytes: this.cfg.prime_chunk_bytes,
           });
@@ -523,6 +528,9 @@ export class QuickProxy {
           );
 
           const parsed = this.finalizeOutput(result, allowed, choice);
+          if (parsed.refused) {
+            throw new UpstreamError('upstream refused to call the client tools', { code: 'tool_refusal' });
+          }
           if (!hasVisibleText(parsed.text) && parsed.toolCalls.length === 0) {
             throw new UpstreamError(`upstream returned an empty response (completion_tokens=${result.usage.completionTokens})`, { code: 'empty_response' });
           }
@@ -587,7 +595,8 @@ export class QuickProxy {
       calls = calls.map((call) => ({ ...call, arguments: normalizeArguments(call.arguments) }));
       calls = limitToolCalls(calls, choice);
     }
-    return { text, toolCalls: calls, native };
+    const refused = allowed.size > 0 && calls.length === 0 && looksLikeToolRefusal(text);
+    return { text, toolCalls: calls, native, refused };
   }
 
   async refreshIfNeeded(account, force = false) {
@@ -681,7 +690,7 @@ function errorType(err) {
 function isRetryable(err) {
   if (!err) return false;
   if (err.name === 'ClientError') return false;
-  if (err.code === 'empty_response') return true;
+  if (err.code === 'empty_response' || err.code === 'tool_refusal') return true;
   if (err.code === 'timeout') return true;
   if (!err.status) return true;
   return err.status === 401 || err.status === 403 || err.status === 408 || err.status === 429 || err.status >= 500;

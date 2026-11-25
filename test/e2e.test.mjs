@@ -24,9 +24,10 @@ const TOOLS = [
   },
 ];
 
-async function startStack({ toolCall, system = SYSTEM } = {}) {
+async function startStack({ toolCall, behavior, system = SYSTEM, maxAttempts = 1 } = {}) {
   const mock = await new MockUpstream({
     toolCall: toolCall === undefined ? { name: 'Bash', arguments: { command: 'echo hi-from-mock', description: 'echo' } } : toolCall,
+    behavior,
   }).start();
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quick2api-test-'));
@@ -37,7 +38,7 @@ async function startStack({ toolCall, system = SYSTEM } = {}) {
     api_keys: [],
     session_reuse: true,
     keep_sessions: false,
-    max_attempts: 1,
+    max_attempts: maxAttempts,
     request_timeout_ms: 30_000,
     refresh_before_ms: 600_000,
     session_ttl_ms: 1_800_000,
@@ -194,7 +195,34 @@ test('reuses the upstream thread when only the system prompt changes', async () 
     const delta = stack.mock.userMessages.at(-1);
     assert.match(delta, /continue/);
     assert.doesNotMatch(delta, /dynamic date/);
-    assert.match(delta, /Tool use reminder/);
+    assert.match(delta, /\[Client tools\]/);
+  } finally {
+    await stack.close();
+  }
+});
+
+test('retries once when Quick refuses to call the client tools', async () => {
+  let actual = 0;
+  const stack = await startStack({
+    maxAttempts: 2,
+    behavior: ({ isSetup }) => {
+      if (isSetup) return 'ACK';
+      actual += 1;
+      return actual === 1 ? '我无法读取你电脑上的文件，请手动修改。' : 'RECOVERED';
+    },
+  });
+  try {
+    const res = await postMessages(stack.port, {
+      model: 'claude-opus-5-5',
+      max_tokens: 256,
+      stream: true,
+      system: 'You are a coding assistant.',
+      messages: [{ role: 'user', content: '改一下 CSS' }],
+      tools: TOOLS,
+    });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(textOf(parseSse(res.text)), 'RECOVERED', res.text);
+    assert.equal(stack.mock.userMessages.length, 2, 'first refusal should trigger one retry');
   } finally {
     await stack.close();
   }
