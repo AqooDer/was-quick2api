@@ -212,7 +212,9 @@ export class QuickProxy {
     ].filter(Boolean).join('\n\n');
     const allowed = toolNameSet(tools);
     const requestedModel = String(body.model || this.cfg.default_model);
-    const auxiliary = tools.length === 0 && messages.length === 1 && /haiku/i.test(requestedModel);
+    // Claude Code sends title/summary requests with no tools; CC Switch may
+    // rewrite their model, so model-name detection is unreliable.
+    const auxiliary = tools.length === 0;
     const upstreamModel = mapModel(this.cfg, requestedModel);
     const stream = body.stream === true;
     const responseModel = requestedModel || upstreamModel;
@@ -499,7 +501,7 @@ export class QuickProxy {
         log(
           this.logger,
           'info',
-          `chat attempt=${attempt}/${maxAttempts} account=${accountLabel(account)} resume=${useResume} thread=${threadId} turns=${turns.length} images=${attachments.length} turn_bytes=${turns.map((t) => byteLength(t)).join(',')}`,
+          `chat attempt=${attempt}/${maxAttempts} account=${accountLabel(account)} resume=${useResume} auxiliary=${auxiliary} thread=${threadId} turns=${turns.length} images=${attachments.length} turn_bytes=${turns.map((t) => byteLength(t)).join(',')}`,
         );
         try {
           const result = await this.upstream.chat(

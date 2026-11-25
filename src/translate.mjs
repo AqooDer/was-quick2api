@@ -544,15 +544,57 @@ export function resolveToolName(name, allowed) {
   return match;
 }
 
+/** Escape raw control characters inside JSON strings (models often emit
+ * multi-line shell commands without \n escapes). */
+function repairJsonControls(text) {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of String(text)) {
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+      } else if (ch === '\\') {
+        out += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        out += ch;
+        inString = false;
+      } else if (ch === '\n') {
+        out += '\\n';
+      } else if (ch === '\r') {
+        out += '\\r';
+      } else if (ch === '\t') {
+        out += '\\t';
+      } else {
+        out += ch;
+      }
+    } else {
+      out += ch;
+      if (ch === '"') inString = true;
+    }
+  }
+  return out;
+}
+
+function parseLooseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    try {
+      return JSON.parse(repairJsonControls(text));
+    } catch {
+      return null;
+    }
+  }
+}
+
 function parseToolEnvelopes(payload) {
   const text = String(payload || '').trim();
   if (!text) return [];
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return [];
-  }
+  const parsed = parseLooseJson(text);
+  if (parsed === null) return [];
   if (Array.isArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') {
     for (const key of ['tool_calls', 'calls']) {

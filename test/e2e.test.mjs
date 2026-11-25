@@ -200,6 +200,24 @@ test('reuses the upstream thread when only the system prompt changes', async () 
   }
 });
 
+test('no-tools title/summary requests are ephemeral', async () => {
+  const stack = await startStack({ toolCall: null });
+  try {
+    const res = await postMessages(stack.port, {
+      model: 'claude-opus-5-5',
+      max_tokens: 64,
+      stream: true,
+      system: 'Generate a short title.',
+      messages: [{ role: 'user', content: 'title me' }],
+      tools: [],
+    });
+    assert.equal(res.status, 200, res.text);
+    assert.ok(stack.mock.frames.some((f) => f.type === 'session_delete'), 'expected ephemeral session_delete');
+  } finally {
+    await stack.close();
+  }
+});
+
 test('maps a native upstream tool call and ends the waiting turn', async () => {
   const stack = await startStack({
     behavior: () => ({ nativeTools: [{ id: 'native-1', name: 'bash', arguments: { command: 'pwd' } }] }),

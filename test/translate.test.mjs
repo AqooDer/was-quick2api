@@ -230,3 +230,14 @@ test('extracts images nested in tool_result content', async () => {
   assert.equal(images[0].mediaType, 'image/jpeg');
   assert.equal(images[0].bytes.toString(), 'xyz');
 });
+
+test('parses a tool call whose command contains raw newlines', () => {
+  const raw = `<client_tool_call>{"name":"Bash","arguments":{"command":"line one
+line two","description":"multi-line"}}</client_tool_call>`;
+  const parsed = parseClientToolCalls(raw, new Set(['Bash']));
+  assert.equal(parsed.calls.length, 1);
+  assert.equal(parsed.calls[0].name, 'Bash');
+  const args = JSON.parse(parsed.calls[0].arguments);
+  assert.equal(args.command, 'line one\nline two');
+  assert.equal(parsed.text, '');
+});
