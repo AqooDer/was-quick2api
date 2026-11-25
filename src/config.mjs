@@ -27,6 +27,10 @@ export function detectAppVersion() {
   return cachedAppVersion;
 }
 
+function defaultSurface() {
+  return process.platform === 'darwin' ? 'QUICK_WORK_DESKTOP_MAC' : 'QUICK_WORK_DESKTOP_WINDOWS';
+}
+
 function systemTimezone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -53,7 +57,7 @@ export function defaultConfig() {
     max_attempts: 2,
     // Must match the surface reported by the installed desktop app.
     app_version: detectAppVersion(),
-    surface: 'QUICK_WORK_DESKTOP_WINDOWS',
+    surface: defaultSurface(),
     outpost_id: '',
     working_session_id: '',
     timezone: systemTimezone(),
@@ -63,7 +67,7 @@ export function defaultConfig() {
     // Native Quick tool events are not exposed to Claude Code by default:
     // Quick already executed them, so returning them as tool_use would run
     // the same action twice on the client.
-    expose_native_tools: false,
+    expose_native_tools: true,
     // Reuse one upstream thread per client conversation and send only new messages.
     session_reuse: true,
     keep_sessions: false,

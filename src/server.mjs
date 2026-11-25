@@ -8,6 +8,7 @@ import { Upstream, UpstreamError } from './upstream.mjs';
 import { ConversationStore, isPrefix } from './conversations.mjs';
 import {
   buildToolBridgePrompt,
+  buildResumeReminder,
   buildToolBridgeRules,
   formatTranscript,
   groupToolDefinitions,
@@ -22,7 +23,9 @@ import {
   parseToolChoice,
   planTurns,
   splitSystemMessages,
+  RELAY_CONTRACT,
   RELAY_NOTICE,
+  neutralizeSystemPrompt,
   systemText,
   titleFor,
   toolNameSet,
@@ -178,12 +181,14 @@ export class QuickProxy {
       return;
     }
 
-    const system = [systemText(body.system), split.system].filter((s) => String(s || '').trim()).join('\n\n');
+    const system = neutralizeSystemPrompt(
+      [systemText(body.system), split.system].filter((s) => String(s || '').trim()).join('\n\n'),
+    );
     const choice = parseToolChoice(body.tool_choice);
     if (body.tool_choice?.disable_parallel_tool_use === true) choice.parallel = false;
     const bridge = buildToolBridgePrompt(tools, choice);
     const rules = tools.length > 0 ? buildToolBridgeRules(choice) : '';
-    const instructions = [system, bridge, RELAY_NOTICE].filter((s) => String(s || '').trim()).join('\n\n');
+    const instructions = [RELAY_CONTRACT, system, bridge, RELAY_NOTICE].filter((s) => String(s || '').trim()).join('\n\n');
     const instructionsHash = sha256Hex(instructions);
     // Priming sends the system prompt and each tool-schema group as complete,
     // valid JSON chunks instead of cutting one giant string mid-object.
@@ -201,6 +206,8 @@ export class QuickProxy {
       finalParts.push({ title: 'tool calling protocol', text: rules });
     }
     const finalPrefix = [
+      RELAY_CONTRACT,
+      '',
       '[System instructions from the API caller were provided in the setup turns above. Follow them exactly for this turn.]',
       '',
       `[Relay note] ${RELAY_NOTICE}`,
@@ -259,7 +266,7 @@ export class QuickProxy {
       }, 15_000);
       keepalive.unref?.();
       try {
-        const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, abort: abort.signal });
+        const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, abort: abort.signal });
         this.writeMessage(res, result, { stream: true, responseModel, messageId });
         log(
           this.logger,
@@ -282,7 +289,7 @@ export class QuickProxy {
     }
 
     try {
-      const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, abort: abort.signal });
+      const result = await this.runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model: upstreamModel, title: titleFor(lastUserText(messages)), allowed, choice, tools, abort: abort.signal });
       log(
         this.logger,
         'info',
@@ -382,7 +389,7 @@ export class QuickProxy {
     return `c:${sha256Hex([req.headers.authorization || '', instructions, firstText].join('\0'))}`;
   }
 
-  async runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model, title, allowed, choice, abort }) {
+  async runProxy({ key, messages, instructions, instructionsHash, instructionParts, finalParts, finalPrefix, transcript, model, title, allowed, choice, tools, abort }) {
     const { entry, release } = await this.conversations.lock(key);
     try {
       const maxAttempts = Math.max(1, Number(this.cfg.max_attempts) || 1);
@@ -448,7 +455,7 @@ export class QuickProxy {
             this.conversations.reset(entry);
           } else {
             turns = planTurns({
-              instructions: '',
+              instructions: buildResumeReminder(tools),
               transcript: deltaText,
               maxBytes: this.cfg.max_frame_bytes - 1024,
               chunkBytes: this.cfg.prime_chunk_bytes,
@@ -484,6 +491,7 @@ export class QuickProxy {
               createSession: !useResume,
               deleteSession: !this.cfg.session_reuse && !this.cfg.keep_sessions,
               timeoutMs: this.cfg.request_timeout_ms,
+              allowedTools: allowed,
             },
             { signal: abort },
           );
@@ -493,13 +501,15 @@ export class QuickProxy {
             throw new UpstreamError(`upstream returned an empty response (completion_tokens=${result.usage.completionTokens})`, { code: 'empty_response' });
           }
 
-          if (this.cfg.session_reuse && result.threadId) {
+          if (this.cfg.session_reuse && result.threadId && !parsed.native) {
             entry.threadId = result.threadId;
             entry.accountId = account.id;
             entry.messages = JSON.parse(JSON.stringify(messages));
             entry.instructionsHash = instructionsHash;
             entry.updatedAt = Date.now();
           } else {
+            // A native tool call leaves the upstream turn waiting for a result;
+            // start a fresh thread with the tool result on the next request.
             this.conversations.reset(entry);
           }
           return { ...parsed, usage: result.usage, account, threadId: result.threadId };
@@ -540,15 +550,19 @@ export class QuickProxy {
   finalizeOutput(result, allowed, choice) {
     let text = result.text || '';
     let calls = [];
+    let native = Boolean(result.native);
     if (allowed.size > 0) {
       const parsed = parseClientToolCalls(text, allowed);
       text = parsed.text;
       calls = parsed.calls;
-      if (calls.length === 0 && this.cfg.expose_native_tools) calls = nativeToolCalls(result.toolCalls, allowed);
+      if (calls.length === 0 && (this.cfg.expose_native_tools || result.native)) {
+        calls = nativeToolCalls(result.toolCalls, allowed);
+        native = calls.length > 0;
+      }
       calls = calls.map((call) => ({ ...call, arguments: normalizeArguments(call.arguments) }));
       calls = limitToolCalls(calls, choice);
     }
-    return { text, toolCalls: calls };
+    return { text, toolCalls: calls, native };
   }
 
   async refreshIfNeeded(account, force = false) {

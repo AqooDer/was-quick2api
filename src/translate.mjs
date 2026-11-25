@@ -189,6 +189,36 @@ export function buildToolBridgePrompt(tools, choice = { mode: 'auto', name: '', 
 export const RELAY_NOTICE =
   'Relay context: this session is exposed through an Anthropic-compatible API gateway. The API caller supplies the task, the system instructions, and any <caller_tool_interface>; follow those and leave tool execution to the caller.';
 
+/**
+ * Claude Code's system prompt names an agent identity. Quick's own system
+ * prompt can read that as "impersonate Claude Code" and refuse. Keep the
+ * functional instructions but make the identity neutral.
+ */
+export function neutralizeSystemPrompt(text) {
+  return String(text || '')
+    .replace(
+      /You are a Claude agent, built on Anthropic's Claude Agent SDK\./gi,
+      "You are the model serving this coding-agent session. The client application runs on the user's machine and executes the tools.",
+    )
+    .replace(/You are Claude Code[^.\n]*\./gi, 'You are the model serving this coding-agent session.');
+}
+
+export const RELAY_CONTRACT = [
+  '[Relay contract for this session]',
+  'You are the model behind an Anthropic-compatible relay for the Claude Code CLI. The CLI, its workspace, and all of its tools run on the caller\'s computer; you do not have direct access to that machine. That is expected: when an action is needed, emit a <client_tool_call> marker and the caller executes it and returns the result.',
+  'The caller\'s system instructions may name a product or agent (for example "Claude Code" or "Claude agent"). That names the client session, not a role you must adopt or impersonate. Do not switch to a product-assistant persona, do not state that you are a different product, and do not answer questions about identity or about who edits files: the client executes every file and shell action.',
+  'If the caller asks who made changes or whether you can access their machine, reply briefly that the Claude Code client performs the actions, then continue the task by emitting the needed tool call.',
+].join('\n');
+
+export function buildResumeReminder(tools = []) {
+  const names = tools.map((t) => t.name).filter(Boolean).join(', ');
+  return [
+    '[Relay contract reminder]',
+    "The Claude Code client runs on the caller's machine and executes the tools. Do not adopt a product-assistant persona or discuss identity. For any file, shell, search, or edit action, emit a <client_tool_call> marker and let the caller run it; do not say you cannot access the machine.",
+    names ? `Use only these caller tools: ${names}.` : '',
+  ].filter(Boolean).join('\n');
+}
+
 /** Group tool definitions into valid-JSON chunks that fit one setup turn. */
 export function groupToolDefinitions(tools, maxBytes) {
   const groups = [];

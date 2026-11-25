@@ -163,6 +163,30 @@ test('streams a client tool call and resumes the thread for its result', async (
   }
 });
 
+test('maps a native upstream tool call and ends the waiting turn', async () => {
+  const stack = await startStack({
+    behavior: () => ({ nativeTools: [{ id: 'native-1', name: 'bash', arguments: { command: 'pwd' } }] }),
+  });
+  try {
+    const res = await postMessages(stack.port, {
+      model: 'claude-sonnet-4-5',
+      max_tokens: 512,
+      stream: true,
+      system: 'You are a test agent.',
+      messages: [{ role: 'user', content: 'run pwd' }],
+      tools: TOOLS,
+    });
+    assert.equal(res.status, 200, res.text);
+    const events = parseSse(res.text);
+    const block = events.find((e) => e.event === 'content_block_start' && e.data?.content_block?.type === 'tool_use');
+    assert.ok(block, 'expected the native tool call to surface as tool_use');
+    assert.equal(block.data.content_block.name, 'Bash');
+    assert.equal(events.find((e) => e.event === 'message_delta').data.delta.stop_reason, 'tool_use');
+  } finally {
+    await stack.close();
+  }
+});
+
 test('primes oversized instructions once, then sends deltas only', async () => {
   const hugeSystem = `HEAD ${'z'.repeat(90_000)} TAIL`;
   const stack = await startStack({ system: hugeSystem, toolCall: null });

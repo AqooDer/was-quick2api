@@ -175,13 +175,13 @@ node bin/quick2api.mjs refresh           # 立即刷新所有账号
 | `refresh_before` | `10m` | token 到期前多久刷新 |
 | `max_attempts` | `2` | 上游尝试次数（含换账号 / refresh 重试） |
 | `app_version` | 自动检测 / `1.2.4757` | 握手 `appVersion`；新建配置时读取 macOS 已安装版本，失败则用常量 |
-| `surface` | `QUICK_WORK_DESKTOP_WINDOWS` | 握手 `surfaceType`；参考实现也用该值 |
+| `surface` | macOS: `QUICK_WORK_DESKTOP_MAC`，其他: `QUICK_WORK_DESKTOP_WINDOWS` | 握手 `surfaceType`；必须与运行平台一致，否则上游会误判平台 |
 | `outpost_id` / `working_session_id` | 空 | 上游可选字段 |
 | `timezone` | 系统时区 | `user_message.user_timezone` |
 | `locale` | `en-US` | `user_message.user_locale` |
 | `thinking_effort` | 空 | `off/low/medium/high`；空为服务端默认 |
 | `chat_agent_id` | 空 | 指定 Quick 自定义 agent |
-| `expose_native_tools` | `false` | 是否把 Quick 原生工具事件映射为 Anthropic `tool_use`；默认关闭，避免客户端重复执行上游已执行的动作 |
+| `expose_native_tools` | `true` | 把 Quick 原生工具事件映射为 Anthropic `tool_use`；external-agent 模式下 Quick 会等待客户端执行，关闭会导致 95s 超时 |
 | `session_reuse` | `true` | 同一对话复用上游 thread，只发增量 |
 | `keep_sessions` | `false` | `session_reuse=false` 时是否保留每次新建的会话 |
 | `session_ttl` | `30m` | 本地会话映射的闲置过期时间 |
@@ -370,6 +370,14 @@ QUICK2API_LOG=debug node bin/quick2api.mjs serve
 ```
 
 日志会打印 `turns=2 turn_bytes=27533,57905`、`resume=true`、`turn_bytes=287` 等。
+
+**Quick 自称 AWS Quick、拒绝扮演 Claude Code / 拒绝改文件**
+
+- **先开新会话**：旧的 transcript 里已经包含它的拒绝文本，继续同一个会话会不断被模仿。用 `/clear`，或退出后重新 `claude`。
+- 确认 `config.json` 的 `surface` 与平台一致：macOS 用 `QUICK_WORK_DESKTOP_MAC`，Windows 用 `QUICK_WORK_DESKTOP_WINDOWS`。
+- 不要问“你是谁 / 前面是谁改的”这类元问题；直接给具体任务，例如「用 Bash 运行 pwd，把输出告诉我」。
+- quick2api 会在每轮加入 relay contract，并把 Claude Code 的 “You are a Claude agent…” 中性化；如果仍出现旧行为，检查服务是否已重启、是否还在旧会话。
+- 原生工具调用现在会回传给 Claude Code；如果日志出现 `Client sent no frames for >95 seconds`，说明上游在等客户端工具结果，确认 `expose_native_tools` 没被改成 `false`。
 
 **Claude Code 报 API Error / 空回复**：上游可能拒绝、超时或模型只输出了空白。日志里的 `error=` 是上游原始错误。
 

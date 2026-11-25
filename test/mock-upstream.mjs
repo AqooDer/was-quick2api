@@ -87,8 +87,36 @@ export class MockUpstream {
     } else {
       reply = 'MOCK_OK';
     }
+    if (reply && typeof reply === 'object' && Array.isArray(reply.nativeTools)) {
+      this.sendNativeTurn(ws, reply.nativeTools);
+      return;
+    }
     if (reply && typeof reply === 'object') reply = reply.text ?? '';
     this.sendTurn(ws, String(reply ?? ''));
+  }
+
+  sendNativeTurn(ws, calls) {
+    const send = (type, payload) => {
+      const inner = JSON.stringify({ type, payload });
+      const body = JSON.stringify({ payload: Buffer.from(inner, 'utf8').toString('base64') });
+      const frame = encodeMessage(
+        { ':message-type': 'event', ':event-type': type, ':content-type': 'application/json' },
+        Buffer.from(body, 'utf8'),
+      );
+      if (ws.readyState === ws.OPEN) ws.send(frame, { binary: true });
+    };
+    send('message_start', { message_id: 'native' });
+    for (const call of calls) {
+      send('tool_start', { tool_id: call.id || 'call_native', tool_name: call.name, arguments: {} });
+      send('tool_arguments', { tool_id: call.id || 'call_native', tool_name: call.name, arguments: call.arguments });
+      send('tool_call', { tool_call_id: call.id || 'call_native', tool_name: call.name, arguments: call.arguments });
+    }
+    send('message_complete', {
+      continuation_expected: true,
+      tool_calls: calls.map((call) => ({ id: call.id || 'call_native', name: call.name, arguments: call.arguments })),
+    });
+    send('turn_usage', { input_tokens: 10, output_tokens: 5, total_tokens: 15 });
+    // Deliberately no turn_completed: the upstream is waiting for a tool result.
   }
 
   sendTurn(ws, text) {

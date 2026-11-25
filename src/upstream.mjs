@@ -325,7 +325,16 @@ export class Upstream {
       if (signal?.aborted) throw new UpstreamError('request aborted');
       const onAbort = () => conn.close();
       signal?.addEventListener('abort', onAbort, { once: true });
-      pingTimer = setInterval(() => conn.ping(), 25_000);
+      pingTimer = setInterval(() => {
+        conn.ping();
+        // Some Quick deployments count only data frames toward the 95s
+        // client-idle limit; the control ping alone is not enough.
+        try {
+          conn.sendObject({ type: 'ping', payload: {} });
+        } catch {
+          // connection is closing
+        }
+      }, 20_000);
       pingTimer.unref?.();
 
       if (gateway) {
@@ -359,6 +368,7 @@ export class Upstream {
           threadId,
           deadline,
           collect: isLast,
+          allowedTools: input.allowedTools,
           signal,
         });
       }
@@ -377,7 +387,7 @@ export class Upstream {
     }
   }
 
-  async runTurn(conn, { text, model, threadId, deadline, collect, signal }) {
+  async runTurn(conn, { text, model, threadId, deadline, collect, allowedTools, signal }) {
     const messageId = uuid();
     const traceId = uuid();
     const payload = {
@@ -412,7 +422,18 @@ export class Upstream {
     const toolMap = new Map();
     const toolOrder = [];
     const rawArgs = new Map();
-    let argsPartial = new Map();
+    const argsPartial = new Map();
+    let nativeDeadline = 0;
+    let sawNative = false;
+    const matchesAllowed = (name) => {
+      const n = String(name || '').trim().toLowerCase();
+      if (!n || !allowedTools) return false;
+      for (const tool of allowedTools) {
+        const t = String(tool).toLowerCase();
+        if (n === t || n.endsWith(`.${t}`) || n.endsWith(`/${t}`) || n.endsWith(`_${t}`) || n.endsWith(`-${t}`)) return true;
+      }
+      return false;
+    };
 
     const getTool = (idRaw, nameRaw) => {
       let id = String(idRaw || '').trim();
@@ -446,6 +467,7 @@ export class Upstream {
       if (Date.now() > deadline) throw new UpstreamError('upstream turn timed out', { code: 'timeout' });
       let wait = 120_000;
       if (sawMessageComplete && completeDeadline) wait = Math.max(0, completeDeadline - Date.now());
+      if (nativeDeadline) wait = Math.min(wait, Math.max(0, nativeDeadline - Date.now()));
       if (wait <= 0) break;
 
       let frame;
@@ -454,6 +476,7 @@ export class Upstream {
       } catch (err) {
         // A close or a read timeout after message_complete still leaves a
         // complete turn; do not discard the collected answer.
+        if (sawNative && nativeDeadline && Date.now() >= nativeDeadline) break;
         if (sawMessageComplete && completeDeadline) break;
         if (err instanceof TimeoutError && sawMessageComplete) break;
         throw err instanceof TimeoutError ? new UpstreamError('upstream read timed out', { code: 'timeout', cause: err }) : err;
@@ -501,6 +524,11 @@ export class Upstream {
           }
           const tc = getTool(p.tool_id || p.tool_call_id, p.tool_name);
           setArgs(tc, p.arguments);
+          if (collect && matchesAllowed(tc.name)) {
+            sawNative = true;
+            nativeDeadline = Date.now() + 5000;
+            this.logger('info', `native tool ${type} name=${tc.name} id=${tc.id} thread=${threadId}`);
+          }
           break;
         }
         case 'tool_progress': {
@@ -513,8 +541,13 @@ export class Upstream {
         case 'tool_call_update':
         case 'tool_complete': {
           const p = frame.payload || {};
-          const tc = getTool(p.tool_id || p.tool_call_id || p.toolCallId || p.tool_call_id, p.tool_name || p.title);
+          const tc = getTool(p.tool_id || p.tool_call_id || p.toolCallId, p.tool_name || p.title);
           setArgs(tc, p.rawInput ?? p.raw_input ?? p.arguments);
+          if (collect && matchesAllowed(tc.name)) {
+            sawNative = true;
+            nativeDeadline = Date.now() + 3000;
+            this.logger('info', `native tool ${type} name=${tc.name} id=${tc.id} thread=${threadId}`);
+          }
           break;
         }
         case 'message_complete': {
@@ -523,9 +556,17 @@ export class Upstream {
             const tc = getTool(item.id || item.tool_call_id, item.name || item.tool_name || item.function?.name);
             setArgs(tc, item.arguments ?? item.function?.arguments);
           }
+          const nativeCalls = (Array.isArray(p.tool_calls) ? p.tool_calls : []).filter((item) =>
+            matchesAllowed(item?.name || item?.tool_name || item?.function?.name),
+          );
+          if (nativeCalls.length > 0) {
+            sawNative = true;
+            nativeDeadline = Date.now() + 1000;
+          }
           if (p.continuation_expected) {
             sawMessageComplete = false;
             completeDeadline = 0;
+            if (sawNative) break;
           } else {
             sawMessageComplete = true;
             completeDeadline = Date.now() + 5000;
@@ -563,6 +604,7 @@ export class Upstream {
 
     if (collect) {
       result.text = turnText;
+      result.native = sawNative;
       result.toolCalls = [];
       for (const id of toolOrder) {
         const tc = toolMap.get(id);

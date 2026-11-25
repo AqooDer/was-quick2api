@@ -6,6 +6,8 @@ import {
   formatTranscript,
   groupToolDefinitions,
   limitToolCalls,
+  buildResumeReminder,
+  neutralizeSystemPrompt,
   normalizeMessages,
   normalizeTools,
   parseClientToolCalls,
@@ -13,6 +15,7 @@ import {
   planTurns,
   resolveToolName,
   splitSystemMessages,
+  RELAY_CONTRACT,
   systemText,
 } from '../src/translate.mjs';
 
@@ -172,4 +175,18 @@ test('system/developer messages are promoted to instructions', () => {
   ]);
   assert.equal(split.system, 'SYS ONE\n\nSYS TWO');
   assert.deepEqual(split.messages.map((m) => m.role), ['user', 'assistant']);
+});
+
+test('system identity is neutralized for the upstream agent', () => {
+  const neutral = neutralizeSystemPrompt("You are a Claude agent, built on Anthropic's Claude Agent SDK.\nFollow the rules.");
+  assert.doesNotMatch(neutral, /built on Anthropic's Claude Agent SDK/);
+  assert.match(neutral, /model serving this coding-agent session/);
+  assert.match(RELAY_CONTRACT, /<client_tool_call>/);
+});
+
+test('resume reminder restates the tool contract', () => {
+  const reminder = buildResumeReminder([{ name: 'Bash' }, { name: 'Read' }]);
+  assert.match(reminder, /client runs on the caller's machine/);
+  assert.match(reminder, /<client_tool_call>/);
+  assert.match(reminder, /Bash, Read/);
 });
