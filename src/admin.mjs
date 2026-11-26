@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import crypto from 'node:crypto';
 import { publicAccount } from './accounts.mjs';
 import { LoginFlow, refreshAccount } from './oauth.mjs';
@@ -72,6 +73,21 @@ function sameOrigin(req) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function successPage(email) {
+  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>登录成功</title>
+<body style="font:16px/1.7 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;background:#0b0f19;color:#e5e7eb;padding:12vh 24px">
+<div style="max-width:560px;margin:auto;background:#111827;border:1px solid #253047;border-radius:16px;padding:28px">
+<h2 style="margin:0 0 8px;color:#34d399">登录成功</h2>
+<p>账号 <b>${escapeHtml(email)}</b> 已写入 accounts.json，并设为当前账号。</p>
+<p style="color:#94a3b8">可以关闭此页，回到管理台；管理台会自动刷新。</p>
+<p><a style="color:#f5c542" href="http://127.0.0.1:8080/admin">返回管理台</a></p>
+</div></body></html>`;
+}
+
 function minutes(value) {
   if (value === null || value === undefined) return null;
   return Math.max(0, Math.round(value));
@@ -86,6 +102,7 @@ export class AdminPanel {
     this.sessions = new Map();
     this.flows = new Map();
     this.attempts = new Map();
+    this.browserFlow = null;
   }
 
   needsAuth() {
@@ -176,6 +193,15 @@ export class AdminPanel {
     }
     if (sub === 'login/start' && req.method === 'POST') {
       await this.handleLoginStart(req, res);
+      return;
+    }
+    if (sub === 'login/cancel' && req.method === 'POST') {
+      this.closeBrowserFlow();
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (sub === 'login/status' && req.method === 'GET') {
+      this.handleLoginStatus(req, res, url);
       return;
     }
     if (sub === 'login/complete' && req.method === 'POST') {
@@ -285,6 +311,137 @@ export class AdminPanel {
     }
   }
 
+  closeBrowserFlow() {
+    const active = this.browserFlow;
+    this.browserFlow = null;
+    if (active) this.closeBrowserServer(active);
+  }
+
+  closeBrowserServer(active) {
+    if (!active?.server) return;
+    active.server.closeAllConnections?.();
+    active.server.close(() => {});
+  }
+
+  async startBrowserLogin(req, res, body) {
+    this.closeBrowserFlow();
+    const port = Number(body.port) || 18080;
+    const provider = String(body.provider || 'social');
+    const flow = new LoginFlow({
+      provider,
+      stage: String(body.stage || 'prod'),
+      region: String(body.region || ''),
+      port,
+      appVersion: this.cfg.app_version,
+      logger: (m) => this.logger('info', `admin login: ${m}`),
+    });
+    const server = http.createServer((req, res2) => {
+      this.handleBrowserCallback(req, res2).catch((err) => {
+        if (!res2.headersSent) res2.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(err.message);
+      });
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(port, '127.0.0.1', resolve);
+      });
+    } catch (err) {
+      throw new Error(`cannot listen on 127.0.0.1:${port}: ${err.message}. 改用手动回调模式。`);
+    }
+    const token = crypto.randomBytes(24).toString('base64url');
+    this.browserFlow = {
+      token,
+      flow,
+      server,
+      status: 'waiting',
+      error: '',
+      account: null,
+      expiresAt: Date.now() + FLOW_TTL_MS,
+    };
+    const timer = setTimeout(() => {
+      if (this.browserFlow?.token === token && this.browserFlow.status !== 'done') {
+        this.browserFlow.status = 'error';
+        this.browserFlow.error = 'timed out waiting for browser callback';
+        this.closeBrowserFlow();
+      }
+    }, FLOW_TTL_MS);
+    timer.unref?.();
+    sendJson(res, 200, {
+      ok: true,
+      mode: 'browser',
+      token,
+      step: 'browser',
+      login_url: flow.loginUrl,
+      callback_url: flow.redirectUri,
+      message: '在浏览器完成登录；本页会自动检测结果，不需要复制回调 URL。',
+    });
+  }
+
+  async handleBrowserCallback(req, res) {
+    const active = this.browserFlow;
+    if (!active) {
+      res.writeHead(410, { 'content-type': 'text/plain; charset=utf-8' }).end('登录流程已结束，请回管理台重新开始。');
+      return;
+    }
+    const url = new URL(req.url, `http://127.0.0.1:${active.flow.port}`);
+    res.setHeader('cache-control', 'no-store');
+    if (url.pathname === '/favicon.ico') {
+      res.writeHead(204).end();
+      return;
+    }
+    if (url.pathname === '/callback') {
+      try {
+        const authorizeUrl = await active.flow.handleDiscovery(url.searchParams);
+        active.status = 'authorize';
+        res.writeHead(302, { location: authorizeUrl }).end();
+      } catch (err) {
+        active.status = 'error';
+        active.error = err.message;
+        res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end(`登录失败：${err.message}`);
+      }
+      return;
+    }
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      try {
+        const account = await active.flow.handleCode(url.searchParams);
+        const stored = this.store.upsert(account);
+        this.store.setActive(stored.id);
+        active.status = 'done';
+        active.account = publicAccount(stored);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(successPage(stored.email || stored.display_name || stored.id));
+        setImmediate(() => this.closeBrowserServer(active));
+      } catch (err) {
+        active.status = 'error';
+        active.error = err.message;
+        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><h2>登录失败</h2><p>${escapeHtml(err.message)}</p><p><a href="/admin">返回管理台</a></p>`);
+        setImmediate(() => this.closeBrowserServer(active));
+      }
+      return;
+    }
+    res.writeHead(404).end('not found');
+  }
+
+  handleLoginStatus(req, res, url) {
+    const token = String(url.searchParams.get('token') || '');
+    const active = this.browserFlow;
+    if (!active || active.token !== token) {
+      sendJson(res, 404, { ok: false, error: 'login flow not found or expired' });
+      return;
+    }
+    if (active.expiresAt < Date.now() && active.status !== 'done') {
+      sendJson(res, 200, { ok: true, step: 'error', error: 'login flow expired' });
+      return;
+    }
+    sendJson(res, 200, {
+      ok: true,
+      step: active.status,
+      error: active.error || '',
+      account: active.account,
+      callback_url: active.flow.redirectUri,
+      state: active.status === 'done' ? this.state() : null,
+    });
+  }
+
   async handleLoginStart(req, res) {
     let body = {};
     try {
@@ -293,7 +450,12 @@ export class AdminPanel {
       sendJson(res, 400, { ok: false, error: err.message });
       return;
     }
+    const mode = String(body.mode || 'browser');
     try {
+      if (mode === 'browser') {
+        await this.startBrowserLogin(req, res, body);
+        return;
+      }
       const flow = new LoginFlow({
         provider: String(body.provider || 'social'),
         stage: String(body.stage || 'prod'),
@@ -306,6 +468,7 @@ export class AdminPanel {
       this.flows.set(token, { flow, expiresAt: Date.now() + FLOW_TTL_MS });
       sendJson(res, 200, {
         ok: true,
+        mode: 'manual',
         token,
         step: 'discovery',
         login_url: flow.loginUrl,

@@ -36,6 +36,7 @@ async function stack({ password = 'secret' } = {}) {
   return {
     cfg, store, server, port,
     async close() {
+      proxy.admin.closeBrowserFlow();
       await new Promise((r) => server.close(r));
       fs.rmSync(dir, { recursive: true, force: true });
     },
@@ -101,7 +102,7 @@ test('admin login wizard starts a flow without requiring a callback server', asy
     const start = await fetch(url(s, '/admin/api/login/start'), {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-quick2api-admin': '1' },
-      body: JSON.stringify({ provider: 'social', stage: 'prod' }),
+      body: JSON.stringify({ provider: 'social', stage: 'prod', mode: 'manual' }),
     });
     assert.equal(start.status, 200);
     const body = await start.json();

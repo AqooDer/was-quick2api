@@ -77,8 +77,14 @@ input,select,textarea{background:#0b1220;border:1px solid var(--line);color:var(
         <div style="min-width:130px"><label>Provider</label><select id="provider"><option value="social">social</option><option value="enterprise">enterprise</option></select></div>
         <div style="min-width:110px"><label>Stage</label><select id="stage"><option>prod</option><option>beta</option><option>integ</option><option>dev</option></select></div>
         <div style="min-width:160px"><label>Region（可选）</label><input id="region" placeholder="us-east-1"></div>
-        <button class="primary" type="submit">开始登录</button>
+        <button class="primary" type="submit">浏览器登录</button>
+        <button type="button" id="manualLoginBtn">手动回调</button>
       </form>
+      <div id="browserFlow" class="hide" style="margin-top:14px">
+        <div class="row spread"><span class="green" id="browserStatus">等待浏览器完成登录…</span><a id="browserOpen" class="gold small" href="#" target="_blank" rel="noopener">重新打开登录页</a></div>
+        <div class="muted small" style="margin-top:6px">浏览器会自动完成 discovery → authorize → callback；本页会自动检测，不需要复制 URL。</div>
+        <div id="browserError" class="red small" style="margin-top:6px"></div>
+      </div>
       <div id="loginFlow" class="hide" style="margin-top:14px">
         <div class="steps" id="flowSteps"></div>
         <div id="flowUrlWrap" class="hide" style="margin-top:10px">
@@ -220,14 +226,48 @@ $('#accounts').addEventListener('click', async (e)=>{
   finally{ btn.disabled=false; }
 });
 
-$('#loginStartForm').addEventListener('submit', async (e)=>{
-  e.preventDefault();
+async function startLogin(mode){
+  $('#browserFlow').classList.add('hide');
+  $('#loginFlow').classList.add('hide');
   try{
-    FLOW = await api('/admin/api/login/start',{method:'POST',body:JSON.stringify({provider:$('#provider').value,stage:$('#stage').value,region:$('#region').value})});
-    FLOW.step='discovery';
-    renderFlow();
+    const d = await api('/admin/api/login/start',{method:'POST',body:JSON.stringify({provider:$('#provider').value,stage:$('#stage').value,region:$('#region').value,mode})});
+    FLOW = d;
+    if(d.mode==='browser'){
+      $('#browserFlow').classList.remove('hide');
+      $('#browserStatus').textContent='等待浏览器完成登录…';
+      $('#browserError').textContent='';
+      $('#browserOpen').href=d.login_url;
+      window.open(d.login_url,'_blank','noopener');
+      pollBrowser();
+    }else{
+      FLOW.step='discovery';
+      renderFlow();
+    }
   }catch(err){ toast(err.message,true); }
-});
+}
+$('#loginStartForm').addEventListener('submit', (e)=>{e.preventDefault();startLogin('browser');});
+$('#manualLoginBtn').addEventListener('click', ()=>startLogin('manual'));
+async function pollBrowser(){
+  if(!FLOW || FLOW.mode!=='browser') return;
+  try{
+    const d = await api('/admin/api/login/status?token='+encodeURIComponent(FLOW.token));
+    if(d.step==='done'){
+      $('#browserStatus').textContent='登录成功，账号已设为当前。';
+      $('#browserStatus').className='green';
+      STATE=d.state; render(); toast('新账号已登录并设为当前');
+      return;
+    }
+    if(d.step==='error'){
+      $('#browserStatus').textContent='登录未完成';
+      $('#browserError').textContent=d.error||'未知错误';
+      return;
+    }
+    $('#browserStatus').textContent = d.step==='authorize' ? '已收到 discovery，等待 authorize 完成…' : '等待浏览器完成登录…';
+    setTimeout(pollBrowser,1500);
+  }catch(err){
+    $('#browserError').textContent=err.message;
+  }
+}
 function renderFlow(){
   $('#loginFlow').classList.remove('hide');
   $('#flowDone').classList.add('hide');
