@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { publicAccount } from './accounts.mjs';
 import { LoginFlow, refreshAccount } from './oauth.mjs';
 import { fetchUsage } from './usage.mjs';
+import { detectQuickDesktopAccount } from './desktop.mjs';
 import { safeEqual } from './util.mjs';
 
 const ADMIN_HTML = fs.readFileSync(new URL('./admin.html', import.meta.url), 'utf8');
@@ -131,11 +132,18 @@ export class AdminPanel {
 
   state() {
     const activeId = this.store.getActiveId();
+    const active = activeId ? this.store.get(activeId) : null;
+    const desktop = detectQuickDesktopAccount();
+    const activeEmail = String(active?.email || '').toLowerCase();
+    const desktopEmail = String(desktop.email || '').toLowerCase();
+    const consistent = activeEmail && desktopEmail ? activeEmail === desktopEmail : null;
     return {
       ok: true,
       version: '0.1.0',
       auth_required: this.needsAuth(),
       active_id: activeId,
+      active_email: active?.email || '',
+      desktop: { ...desktop, consistent },
       accounts: this.store.list().map((a) => ({
         ...publicAccount(a),
         active: a.id === activeId,

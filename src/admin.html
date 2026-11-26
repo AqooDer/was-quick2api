@@ -33,6 +33,9 @@ input,select,textarea{background:#0b1220;border:1px solid var(--line);color:var(
 .login-wrap{max-width:380px;margin:12vh auto;background:#0f172acc;border:1px solid var(--line);border-radius:16px;padding:26px}
 .toast{position:fixed;right:22px;bottom:22px;background:#111827;border:1px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 12px 30px #0008;z-index:99;max-width:520px}
 .notice{border:1px solid #7c5b12;background:#f5c54210;color:#f7df9a;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px}
+.notice.ok{border-color:#14532d;background:#052e1a80;color:#86efac}
+.notice.warn{border-color:#7f1d1d;background:#3f0d1380;color:#fecaca}
+.notice.unknown{border-color:#334155;background:#0f172a80;color:#cbd5e1}
 </style>
 </head>
 <body>
@@ -59,6 +62,7 @@ input,select,textarea{background:#0b1220;border:1px solid var(--line);color:var(
 
   <section id="appView" class="hide">
     <div id="authNotice" class="notice hide"></div>
+    <div id="consistency" class="notice unknown hide"></div>
     <div class="row spread">
       <div>
         <div class="muted small">当前账号</div>
@@ -153,8 +157,27 @@ async function load(){
 
 function activeAccount(){return STATE?.accounts?.find(a=>a.active);}
 
+function renderConsistency(){
+  const el=$('#consistency'); const d=STATE?.desktop; const active=activeAccount();
+  el.classList.remove('hide','ok','warn','unknown','notice'); el.classList.add('notice');
+  if(!active){ el.classList.add('unknown'); el.textContent='未设置代理当前账号，无法与 Quick 桌面端比对。请先在下方登录或设为当前。'; return; }
+  if(!d || !d.available){
+    el.classList.add('unknown');
+    el.textContent='未能自动识别 Quick 桌面端账号：'+(d?.reason||'请确认 Quick 已启动并登录后刷新。')+' 代理当前账号：'+(active.email||active.id);
+    return;
+  }
+  if(d.consistent===true){
+    el.classList.add('ok');
+    el.textContent='账号一致：代理当前账号与 Quick 桌面端都是 '+(active.email||active.id)+'。';
+    return;
+  }
+  el.classList.add('warn');
+  el.innerHTML='<b>账号不一致：</b>代理当前账号是 <b>'+esc(active.email||active.id)+'</b>，Quick 桌面端最近使用的是 <b>'+esc(d.email)+'</b>。<br>API 请求仍按代理当前账号运行，不会因此失败；但桌面端看不到代理账号的会话和额度。如果要在桌面端查看，请把 Quick 桌面端也登录成同一个账号。';
+}
+
 function render(){
   const active = activeAccount();
+  renderConsistency();
   $('#activeLabel').textContent = active ? ('当前：' + (active.email || active.display_name || active.id)) : '未设置当前账号';
   $('#activeAccount').textContent = active ? (active.email || active.display_name || active.id) : '未设置（轮询所有可用账号）';
   const box = $('#accounts');
