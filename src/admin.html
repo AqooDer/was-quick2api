@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quick2API Admin</title>
+<style>
+:root{--bg:#0b0f19;--panel:#111827;--panel2:#0f172a;--line:#253047;--text:#e5e7eb;--muted:#94a3b8;--gold:#f5c542;--green:#34d399;--red:#fb7185;--blue:#60a5fa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#1b2440 0,var(--bg) 55%);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--line);background:#0b0f19cc;backdrop-filter:blur(8px);position:sticky;top:0;z-index:10}
+h1{font-size:18px;margin:0;letter-spacing:.5px}h1 span{color:var(--gold)}
+main{max-width:1200px;margin:0 auto;padding:24px 28px 60px}
+.hide{display:none!important}
+.muted{color:var(--muted)}.small{font-size:12px}.gold{color:var(--gold)}.green{color:var(--green)}.red{color:var(--red)}
+button{border:1px solid var(--line);background:#172033;color:var(--text);padding:7px 12px;border-radius:8px;cursor:pointer;font-size:13px}button:hover{border-color:#3b4a68;background:#1c2740}button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--gold);border-color:var(--gold);color:#1a1605;font-weight:600}button.danger{color:var(--red);border-color:#4a2430}
+input,select,textarea{background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;font:inherit;width:100%}textarea{min-height:72px;resize:vertical}label{display:block;margin:10px 0 5px;color:var(--muted);font-size:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}
+.card{background:linear-gradient(160deg,#121a2bee,#0d1422ee);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.card.active{border-color:#f5c54288;box-shadow:0 0 0 1px #f5c54222,0 12px 32px #f5c5420d}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:1px}
+.badge.on{color:#1a1605;background:var(--gold);border-color:var(--gold);font-weight:700}
+.badge.ok{color:var(--green);border-color:#14532d}.badge.off{color:var(--red);border-color:#4a2430}
+.email{font-size:16px;font-weight:600;word-break:break-all}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.usage{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px}
+.bar{height:8px;background:#0b1220;border:1px solid var(--line);border-radius:999px;overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,#60a5fa,#f5c542)}
+.usage .row{margin:4px 0}
+.panel{background:#0f172acc;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:18px}
+.panel h2{font-size:15px;margin:0 0 4px}
+.url{word-break:break-all;background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.steps{margin:8px 0 0 18px;color:var(--muted);font-size:13px}.steps li{margin:4px 0}
+.login-wrap{max-width:380px;margin:12vh auto;background:#0f172acc;border:1px solid var(--line);border-radius:16px;padding:26px}
+.toast{position:fixed;right:22px;bottom:22px;background:#111827;border:1px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 12px 30px #0008;z-index:99;max-width:520px}
+.notice{border:1px solid #7c5b12;background:#f5c54210;color:#f7df9a;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Quick2API <span>Admin</span></h1>
+  <div class="row small muted">
+    <span id="activeLabel">—</span>
+    <button id="logoutBtn" class="hide">退出管理</button>
+  </div>
+</header>
+
+<main>
+  <section id="loginView" class="hide">
+    <div class="login-wrap">
+      <h2 style="margin:0 0 6px">管理登录</h2>
+      <p class="muted small" style="margin:0 0 12px">输入启动服务时设置的 <code>QUICK2API_ADMIN_PASSWORD</code>。</p>
+      <form id="loginForm">
+        <label>管理密码</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <div class="row" style="margin-top:14px"><button class="primary" type="submit">登录</button><span id="loginError" class="red small"></span></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="appView" class="hide">
+    <div id="authNotice" class="notice hide"></div>
+    <div class="row spread">
+      <div>
+        <div class="muted small">当前账号</div>
+        <div id="activeAccount" class="email">—</div>
+      </div>
+      <div class="row">
+        <button id="reloadBtn">刷新列表</button>
+      </div>
+    </div>
+    <div id="accounts" class="grid" style="margin-top:16px"></div>
+
+    <div class="panel">
+      <h2>登录新账号</h2>
+      <div class="muted small">登录成功后会自动写入 accounts.json 并设为当前账号。浏览器回调页面打不开是正常的，复制地址栏 URL 即可。</div>
+      <form id="loginStartForm" class="row" style="margin-top:12px;align-items:flex-end">
+        <div style="min-width:130px"><label>Provider</label><select id="provider"><option value="social">social</option><option value="enterprise">enterprise</option></select></div>
+        <div style="min-width:110px"><label>Stage</label><select id="stage"><option>prod</option><option>beta</option><option>integ</option><option>dev</option></select></div>
+        <div style="min-width:160px"><label>Region（可选）</label><input id="region" placeholder="us-east-1"></div>
+        <button class="primary" type="submit">开始登录</button>
+      </form>
+      <div id="loginFlow" class="hide" style="margin-top:14px">
+        <div class="steps" id="flowSteps"></div>
+        <div id="flowUrlWrap" class="hide" style="margin-top:10px">
+          <div class="muted small">在浏览器打开：</div>
+          <div id="flowUrl" class="url"></div>
+        </div>
+        <div id="flowPasteWrap" class="hide" style="margin-top:10px">
+          <label id="flowPasteLabel">粘贴浏览器地址栏完整 URL</label>
+          <textarea id="flowPaste" placeholder="http://localhost:18080/callback?nonce=..."></textarea>
+          <div class="row" style="margin-top:8px"><button class="primary" id="flowContinue">继续</button><button id="flowCancel">取消</button></div>
+        </div>
+        <div id="flowDone" class="hide green" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>使用步骤</h2>
+      <ol class="steps">
+        <li>账号卡片上的“设为当前”会让新的请求只使用该账号；切换即时生效，不用重启服务。</li>
+        <li>“禁用”用于保留账号但暂时不参与轮询；旧账号额度用完时建议禁用。</li>
+        <li>“查额度”读取 Quick 官方月度/会话分钟数；额度为 0 时上游会暂停回复。</li>
+        <li>“刷新”会更新 OAuth token；过期后代理也会自动刷新。</li>
+        <li>Claude Code 仍通过 CC Switch（127.0.0.1:15721）访问本服务，Web 管理台只管理上游账号。</li>
+      </ol>
+    </div>
+  </section>
+</main>
+<div id="toast" class="toast hide"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let STATE = null;
+let USAGE = {};
+let FLOW = null;
+
+function esc(v){return String(v ?? '').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(msg, isError){const el=$('#toast');el.textContent=msg;el.classList.remove('hide');el.style.borderColor=isError?'#7f1d1d':'#253047';clearTimeout(el._t);el._t=setTimeout(()=>el.classList.add('hide'),4500);}
+function fmtDate(ts){if(!ts)return '—';return new Date(ts*1000).toLocaleString();}
+function fmtLeft(sec){if(!sec||sec<=0)return '已过期';if(sec<60)return sec+' 秒';if(sec<3600)return Math.round(sec/60)+' 分钟';return Math.round(sec/3600)+' 小时';}
+function showLogin(){ $('#appView').classList.add('hide'); $('#loginView').classList.remove('hide'); $('#logoutBtn').classList.add('hide'); }
+function showApp(){ $('#loginView').classList.add('hide'); $('#appView').classList.remove('hide'); if(STATE?.auth_required) $('#logoutBtn').classList.remove('hide'); }
+
+async function api(path, options={}){
+  const headers = {'x-quick2api-admin':'1', ...(options.body ? {'content-type':'application/json'} : {})};
+  const res = await fetch(path, {...options, headers:{...headers, ...(options.headers||{})}});
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if(res.status === 401){ showLogin(); const e = new Error(data.error || 'login required'); e.status=401; throw e; }
+  if(!res.ok){ const e = new Error(data.error || ('HTTP '+res.status)); e.status=res.status; throw e; }
+  return data;
+}
+
+async function load(){
+  try{
+    STATE = await api('/admin/api/state');
+    $('#authNotice').classList.toggle('hide', STATE.auth_required);
+    if(!STATE.auth_required){
+      $('#authNotice').textContent = '未设置 QUICK2API_ADMIN_PASSWORD：管理台仅允许本机 loopback 访问。';
+    }
+    render();
+    showApp();
+  }catch(e){
+    if(e.status===401) showLogin(); else toast(e.message,true);
+  }
+}
+
+function activeAccount(){return STATE?.accounts?.find(a=>a.active);}
+
+function render(){
+  const active = activeAccount();
+  $('#activeLabel').textContent = active ? ('当前：' + (active.email || active.display_name || active.id)) : '未设置当前账号';
+  $('#activeAccount').textContent = active ? (active.email || active.display_name || active.id) : '未设置（轮询所有可用账号）';
+  const box = $('#accounts');
+  box.innerHTML = '';
+  if(!STATE?.accounts?.length){ box.innerHTML = '<div class="panel muted">还没有账号，请用下方“登录新账号”。</div>'; return; }
+  for(const a of STATE.accounts){
+    const card=document.createElement('div');
+    card.className='card'+(a.active?' active':'');
+    const usage=USAGE[a.id];
+    card.innerHTML = `
+      <div class="row spread">
+        <div class="email">${esc(a.email || a.display_name || a.id)}</div>
+        <div>${a.active?'<span class="badge on">当前</span>':''}${a.disabled?'<span class="badge off">已禁用</span>':'<span class="badge ok">可用</span>'}</div>
+      </div>
+      <div class="muted small" style="margin-top:6px">
+        ${esc(a.provider || 'social')} · 到期 ${esc(fmtDate(a.expires_at))}（${esc(fmtLeft(a.expires_in_minutes*60))}）
+      </div>
+      <div class="muted small" style="word-break:break-all">ws_host: ${esc(a.ws_host || '—')}</div>
+      ${a.last_error?`<div class="red small" style="margin-top:6px">${esc(a.last_error)}</div>`:''}
+      <div class="actions">
+        ${!a.active?`<button class="primary" data-act="activate" data-id="${esc(a.id)}">设为当前</button>`:''}
+        <button data-act="toggle" data-id="${esc(a.id)}">${a.disabled?'启用':'禁用'}</button>
+        <button data-act="usage" data-id="${esc(a.id)}">查额度</button>
+        <button data-act="refresh" data-id="${esc(a.id)}">刷新 token</button>
+        <button class="danger" data-act="delete" data-id="${esc(a.id)}">删除</button>
+      </div>
+      <div class="usage" id="usage-${esc(a.id)}">${usage?renderUsage(usage):'<span class="muted small">点“查额度”读取 Quick 官方分钟数</span>'}</div>
+    `;
+    box.appendChild(card);
+  }
+}
+
+function renderUsage(u){
+  const m=u.monthly||{}, s=u.session||{};
+  const pct = m.limit ? Math.min(100, Math.round((m.used||0)/m.limit*100)) : 0;
+  const reset = m.resetsAt ? fmtDate(m.resetsAt) : '—';
+  return `
+    <div class="row spread small"><span>月度额度</span><span class="${pct>=100?'red':pct>=80?'gold':'green'}">${m.used ?? '?'} / ${m.limit ?? '?'} 分钟（${pct}%）</span></div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="row spread small muted" style="margin-top:6px"><span>重置：${esc(reset)}</span><span>${esc(u.subscription?.type || '')}</span></div>
+    ${m.warning?.title?`<div class="red small" style="margin-top:6px">${esc(m.warning.title)}</div>`:''}
+    ${s.limit?`<div class="row spread small muted" style="margin-top:6px"><span>会话额度</span><span>${s.used ?? '?'} / ${s.limit}</span></div>`:''}
+  `;
+}
+
+$('#loginForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  $('#loginError').textContent='';
+  try{
+    await api('/admin/api/login',{method:'POST',body:JSON.stringify({password:$('#password').value})});
+    $('#password').value='';
+    await load();
+  }catch(err){ $('#loginError').textContent = err.message; }
+});
+$('#logoutBtn').addEventListener('click', async ()=>{ try{await api('/admin/api/logout',{method:'POST',body:'{}'});}catch{} showLogin(); });
+$('#reloadBtn').addEventListener('click', load);
+
+$('#accounts').addEventListener('click', async (e)=>{
+  const btn=e.target.closest('button[data-act]'); if(!btn) return;
+  const {act,id}=btn.dataset;
+  btn.disabled=true;
+  try{
+    if(act==='activate'){ await api(`/admin/api/accounts/${encodeURIComponent(id)}/activate`,{method:'POST',body:'{}'}); await load(); toast('已切换当前账号'); }
+    else if(act==='toggle'){ const a=STATE.accounts.find(x=>x.id===id); await api(`/admin/api/accounts/${encodeURIComponent(id)}/enable`,{method:'POST',body:JSON.stringify({enabled:a.disabled})}); await load(); }
+    else if(act==='refresh'){ const d=await api(`/admin/api/accounts/${encodeURIComponent(id)}/refresh`,{method:'POST',body:'{}'}); STATE=d.state; render(); toast('token 已刷新'); }
+    else if(act==='usage'){ const d=await api(`/admin/api/accounts/${encodeURIComponent(id)}/usage`,{method:'POST',body:'{}'}); USAGE[id]=d.usage; render(); }
+    else if(act==='delete'){ if(!confirm('删除这个账号？只删本地 accounts.json，不会登出 Quick。')) return; await api(`/admin/api/accounts/${encodeURIComponent(id)}`,{method:'DELETE'}); await load(); toast('已删除'); }
+  }catch(err){ toast(err.message,true); }
+  finally{ btn.disabled=false; }
+});
+
+$('#loginStartForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  try{
+    FLOW = await api('/admin/api/login/start',{method:'POST',body:JSON.stringify({provider:$('#provider').value,stage:$('#stage').value,region:$('#region').value})});
+    FLOW.step='discovery';
+    renderFlow();
+  }catch(err){ toast(err.message,true); }
+});
+function renderFlow(){
+  $('#loginFlow').classList.remove('hide');
+  $('#flowDone').classList.add('hide');
+  $('#flowUrlWrap').classList.remove('hide');
+  $('#flowPasteWrap').classList.remove('hide');
+  const url = FLOW.step==='authorize' ? FLOW.authorize_url : FLOW.login_url;
+  $('#flowUrl').textContent = url || '';
+  $('#flowPasteLabel').textContent = FLOW.step==='authorize' ? '粘贴浏览器最终回调 URL（含 code）' : '粘贴 discovery 回调 URL（含 nonce）';
+  $('#flowPaste').value='';
+  $('#flowSteps').innerHTML = (FLOW.instructions||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+}
+$('#flowContinue').addEventListener('click', async ()=>{
+  try{
+    const d = await api('/admin/api/login/complete',{method:'POST',body:JSON.stringify({token:FLOW.token,url:$('#flowPaste').value})});
+    if(d.step==='authorize'){ FLOW={...FLOW,step:'authorize',authorize_url:d.authorize_url,instructions:d.instructions}; renderFlow(); }
+    else if(d.step==='done'){ $('#flowPasteWrap').classList.add('hide'); $('#flowDone').classList.remove('hide'); $('#flowDone').textContent='登录完成：'+(d.account?.email||d.account?.id)+'，已设为当前账号。'; STATE=d.state; render(); toast('新账号已登录并设为当前'); }
+  }catch(err){ toast(err.message,true); }
+});
+$('#flowCancel').addEventListener('click', ()=>{ FLOW=null; $('#loginFlow').classList.add('hide'); });
+
+load();
+</script>
+</body>
+</html>

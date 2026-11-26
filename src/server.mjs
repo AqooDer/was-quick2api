@@ -5,6 +5,7 @@ import { mapModel } from './config.mjs';
 import { publicAccount } from './accounts.mjs';
 import { refreshAccount } from './oauth.mjs';
 import { uploadAttachment } from './attachments.mjs';
+import { AdminPanel } from './admin.mjs';
 import { Upstream, UpstreamError } from './upstream.mjs';
 import { ConversationStore, isPrefix } from './conversations.mjs';
 import {
@@ -59,6 +60,7 @@ export class QuickProxy {
     this.upstream = new Upstream(cfg, { logger });
     this.conversations = new ConversationStore({ ttlMs: cfg.session_ttl_ms, max: 256 });
     this.accountLocks = new Map();
+    this.admin = new AdminPanel(cfg, store, { logger });
   }
 
   server() {
@@ -84,7 +86,11 @@ export class QuickProxy {
 
     const path = url.pathname.replace(/\/+$/, '') || '/';
     if (path === '/healthz' || path === '/health') {
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'ok', service: 'quick2api', accounts: this.store.list().length }));
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'ok', service: 'quick2api', accounts: this.store.list().length, active_id: this.store.getActiveId() || null }));
+      return;
+    }
+    if (path === '/admin' || path.startsWith('/admin/')) {
+      await this.admin.handle(req, res, url);
       return;
     }
     if (path === '/api/hello') {

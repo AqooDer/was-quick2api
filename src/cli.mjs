@@ -105,7 +105,7 @@ async function cmdAccounts(argv) {
     const exp = row.expires_at ? new Date(row.expires_at * 1000).toLocaleString() : 'unknown';
     const left = row.expires_at ? Math.max(0, Math.round((row.expires_at - now) / 60)) : 0;
     console.log(
-      `${row.id}  ${row.provider.padEnd(10)} ${(row.email || row.display_name || '-').padEnd(32)} ws_host=${row.ws_host || '-'} expires=${exp} (${left}m)${row.disabled ? ' DISABLED' : ''}${row.last_error ? ` error=${row.last_error}` : ''}`,
+      `${row.active ? '*' : ' '} ${row.id}  ${row.provider.padEnd(10)} ${(row.email || row.display_name || '-').padEnd(32)} ws_host=${row.ws_host || '-'} expires=${exp} (${left}m)${row.disabled ? ' DISABLED' : ''}${row.last_error ? ` error=${row.last_error}` : ''}`,
     );
   }
 }
@@ -175,7 +175,7 @@ async function cmdDoctor(argv) {
     process.exitCode = 1;
     return;
   }
-  let account = accounts[0];
+  let account = accounts.find((a) => a.id === store.getActiveId() && !a.disabled) || accounts.find((a) => !a.disabled) || accounts[0];
   if (account.refresh_token && (!account.expires_at || account.expires_at * 1000 - Date.now() <= cfg.refresh_before_ms)) {
     try {
       const updated = await refreshAccount(account, { logger: (msg) => logger('info', msg) });

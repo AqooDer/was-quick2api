@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node bin/quick2api.mjs serve",
     "login": "node bin/quick2api.mjs login",
-    "test": "node --test test/wire.test.mjs test/translate.test.mjs test/oauth.test.mjs test/e2e.test.mjs test/cli.test.mjs",
+    "test": "node --test test/wire.test.mjs test/translate.test.mjs test/oauth.test.mjs test/e2e.test.mjs test/cli.test.mjs test/admin.test.mjs",
     "service:install": "node scripts/install-service.mjs install",
     "service:status": "node scripts/install-service.mjs status",
     "service:uninstall": "node scripts/install-service.mjs uninstall"

@@ -49,6 +49,7 @@ Claude Code 里的工具（Read / Write / Edit / Bash / Grep / Glob …）仍然
 - 会话复用：Claude Code 每轮重发完整 transcript，代理只把新增消息发给同一个 Quick thread
 - 64 KiB 帧预算：system / tools 过大时先发 setup 轮预热，再发真正的用户消息
 - 请求日志不打印 prompt 内容和 token，只打印字节数、账号、耗时、用量
+- 内嵌 Web 管理台：账号列表、官方额度、启用/禁用、设为当前、刷新 token、删除、网页登录向导
 
 ## 4. 环境要求
 
@@ -155,7 +156,7 @@ node bin/quick2api.mjs login --provider enterprise --region us-east-1
 ### 6.5 账号管理
 
 ```bash
-node bin/quick2api.mjs accounts          # 列表（不打印 token）
+node bin/quick2api.mjs accounts          # 列表，* 为当前账号
 node bin/quick2api.mjs accounts --json
 node bin/quick2api.mjs refresh           # 立即刷新所有账号
 ```
@@ -189,6 +190,7 @@ node bin/quick2api.mjs refresh           # 立即刷新所有账号
 | `prime_chunk_bytes` | `49152` | 预热分段目标大小 |
 | `accounts_file` | `data/accounts.json` | 账号文件，相对配置文件目录 |
 | `log_level` | `info` | `debug/info/warn/error`，也可用 `QUICK2API_LOG` |
+| `admin_password` | 空 | 管理台密码；建议用 `QUICK2API_ADMIN_PASSWORD` 环境变量，不落盘 |
 
 环境变量覆盖：
 
@@ -438,6 +440,9 @@ src/cbor.mjs             Gateway CBOR
 src/translate.mjs        Anthropic → 文本 prompt、工具桥、预热规划
 src/conversations.mjs    会话复用 / 增量
 src/server.mjs           /v1/messages、SSE、重试
+src/admin.mjs            Web 管理 API / 登录向导
+src/admin.html           内嵌管理页面
+src/usage.mjs            Quick 官方分钟额度查询
 src/attachments.mjs      Quick 图片附件上传 / DLP / files-upload
 scripts/install-service.mjs  macOS LaunchAgent 安装/卸载
 scripts/claude-quick     用 --settings 直连 quick2api 的启动脚本
@@ -542,7 +547,113 @@ Claude Code → CC Switch 127.0.0.1:15721 → quick2api 127.0.0.1:8080 → Amazo
 - 不要把 Base URL 写成 `http://127.0.0.1:8080/v1`，否则请求会变成 `/v1/v1/messages`
 - 如果你说的是命令行版 `ccswitch`（`huangdijia/ccswitch` 或 `@supertiny99/cc-switch`），原理相同：新增 Anthropic 兼容 profile，Base URL 填 `http://127.0.0.1:8080`，Token 填 `local`，具体命令以其 README 为准
 
-## 17. 致谢与许可## 17. 致谢与许可
+## 17. Web 管理台（账号 / 额度 / 切换）
+
+启动服务后打开：
+
+```text
+http://127.0.0.1:8080/admin
+```
+
+管理台与推理 API 共用端口，不需要 Node 构建，也没有外部前端资源。
+
+### 17.1 管理密码
+
+推荐启动前设置：
+
+```bash
+export QUICK2API_ADMIN_PASSWORD='一个至少 12 位的密码'
+```
+
+也可以写在 `config.json` 的 `admin_password`（不建议把密码提交到仓库）。不设置密码时，管理台**只允许本机 loopback 访问**；不要把 8080 直接暴露到公网。
+
+### 17.2 账号管理
+
+账号卡片支持：
+
+- **设为当前**：只使用该账号；切换立即生效，**不需要重启服务**
+- **禁用 / 启用**：保留账号但不参与轮询；旧账号额度用完时建议禁用
+- **查额度**：读取 Quick 官方 `profile/usage`，显示月度分钟数、会话额度、重置时间和套餐
+- **刷新 token**：手动刷新 OAuth token
+- **删除**：只删本地 `accounts.json`，不会登出 Quick 账号
+
+设置了“当前账号”后，会话复用只固定在该账号；如果某个旧 thread 属于别的账号，会自动新建 thread，不会把请求发到旧账号。
+
+### 17.3 登录新账号（网页向导）
+
+1. 打开管理台，滚到 **登录新账号**
+2. 选择 `provider` / `stage`（企业 SSO 填 `region`），点 **开始登录**
+3. 浏览器打开页面给出的 **discovery URL**，完成登录
+4. 浏览器会跳到 `localhost:18080/callback?...`；页面打不开是正常的，复制地址栏**完整 URL** 粘回页面，点继续
+5. 页面给出 **authorize URL**，在同一浏览器打开并登录
+6. 浏览器跳到 `127.0.0.1:18080/?code=...`；同样复制完整 URL 粘回页面，点继续
+7. 登录完成后账号自动写入 `accounts.json`，并**自动设为当前账号**
+
+整个过程不需要服务器开放回调端口；回调页面打不开不影响复制 URL。
+
+### 17.4 切换后的验证
+
+```bash
+node bin/quick2api.mjs accounts   # * 标记当前账号
+node bin/quick2api.mjs doctor     # 会优先使用当前/可用账号
+```
+
+Claude Code 和 CC Switch 的配置不用改，仍然通过 `127.0.0.1:15721 → 127.0.0.1:8080` 访问。
+
+## 18. 致谢与许可## 17. Web 管理台（账号 / 额度 / 切换）
+
+启动服务后打开：
+
+```text
+http://127.0.0.1:8080/admin
+```
+
+管理台与推理 API 共用端口，不需要 Node 构建，也没有外部前端资源。
+
+### 17.1 管理密码
+
+推荐启动前设置：
+
+```bash
+export QUICK2API_ADMIN_PASSWORD='一个至少 12 位的密码'
+```
+
+也可以写在 `config.json` 的 `admin_password`（不建议把密码提交到仓库）。不设置密码时，管理台**只允许本机 loopback 访问**；不要把 8080 直接暴露到公网。
+
+### 17.2 账号管理
+
+账号卡片支持：
+
+- **设为当前**：只使用该账号；切换立即生效，**不需要重启服务**
+- **禁用 / 启用**：保留账号但不参与轮询；旧账号额度用完时建议禁用
+- **查额度**：读取 Quick 官方 `profile/usage`，显示月度分钟数、会话额度、重置时间和套餐
+- **刷新 token**：手动刷新 OAuth token
+- **删除**：只删本地 `accounts.json`，不会登出 Quick 账号
+
+设置了“当前账号”后，会话复用只固定在该账号；如果某个旧 thread 属于别的账号，会自动新建 thread，不会把请求发到旧账号。
+
+### 17.3 登录新账号（网页向导）
+
+1. 打开管理台，滚到 **登录新账号**
+2. 选择 `provider` / `stage`（企业 SSO 填 `region`），点 **开始登录**
+3. 浏览器打开页面给出的 **discovery URL**，完成登录
+4. 浏览器会跳到 `localhost:18080/callback?...`；页面打不开是正常的，复制地址栏**完整 URL** 粘回页面，点继续
+5. 页面给出 **authorize URL**，在同一浏览器打开并登录
+6. 浏览器跳到 `127.0.0.1:18080/?code=...`；同样复制完整 URL 粘回页面，点继续
+7. 登录完成后账号自动写入 `accounts.json`，并**自动设为当前账号**
+
+整个过程不需要服务器开放回调端口；回调页面打不开不影响复制 URL。
+
+### 17.4 切换后的验证
+
+```bash
+node bin/quick2api.mjs accounts   # * 标记当前账号
+node bin/quick2api.mjs doctor     # 会优先使用当前/可用账号
+```
+
+Claude Code 和 CC Switch 的配置不用改，仍然通过 `127.0.0.1:15721 → 127.0.0.1:8080` 访问。
+
+## 18. 致谢与许可
 
 - 协议与登录流程参考 [jasonxu114514/aws-quickwork-2api](https://github.com/jasonxu114514/aws-quickwork-2api)（GPLv3）；本项目为独立 Node 实现，未包含其 Go 源码。
 - 本项目沿用仓库根目录的 MIT License（见 [`LICENSE`](./LICENSE)）。

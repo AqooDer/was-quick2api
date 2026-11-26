@@ -26,5 +26,6 @@
   "max_frame_bytes": 63488,
   "prime_chunk_bytes": 49152,
   "accounts_file": "data/accounts.json",
-  "log_level": "info"
+  "log_level": "info",
+  "admin_password": ""
 }

@@ -78,6 +78,7 @@ export function defaultConfig() {
     prime_chunk_bytes: 49152,
     accounts_file: 'data/accounts.json',
     log_level: 'info',
+    admin_password: '',
   };
 }
 
@@ -125,6 +126,7 @@ export function loadConfig(file = configPathFromArgs()) {
   if (process.env.QUICK2API_ADDR) cfg.addr = process.env.QUICK2API_ADDR;
   if (process.env.QUICK2API_API_KEY) cfg.api_keys = process.env.QUICK2API_API_KEY.split(',').map((s) => s.trim()).filter(Boolean);
   if (process.env.QUICK2API_APP_VERSION) cfg.app_version = process.env.QUICK2API_APP_VERSION;
+  cfg.admin_password = String(process.env.QUICK2API_ADMIN_PASSWORD || cfg.admin_password || '');
   return cfg;
 }
 

@@ -12,6 +12,7 @@ export class AccountStore {
   constructor(file) {
     this.file = file;
     this.accounts = [];
+    this.activeId = '';
     this.loadedAt = 0;
     this.mtimeMs = 0;
   }
@@ -20,9 +21,11 @@ export class AccountStore {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.accounts = Array.isArray(raw.accounts) ? raw.accounts : [];
+      this.activeId = typeof raw.active_id === 'string' ? raw.active_id : '';
     } catch (err) {
       if (err.code !== 'ENOENT') throw new Error(`cannot read accounts ${this.file}: ${err.message}`);
       this.accounts = [];
+      this.activeId = '';
     }
     this.loadedAt = Date.now();
     try {
@@ -36,7 +39,7 @@ export class AccountStore {
   save() {
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify({ version: 1, accounts: this.accounts }, null, 2)}\n`, { mode: 0o600 });
+    fs.writeFileSync(tmp, `${JSON.stringify({ version: 1, active_id: this.activeId, accounts: this.accounts }, null, 2)}\n`, { mode: 0o600 });
     fs.renameSync(tmp, this.file);
     try {
       this.mtimeMs = fs.statSync(this.file).mtimeMs;
@@ -97,13 +100,33 @@ export class AccountStore {
   remove(id) {
     const before = this.accounts.length;
     this.accounts = this.accounts.filter((a) => a.id !== id);
+    if (this.activeId === id) this.activeId = '';
     if (this.accounts.length !== before) this.save();
     return before !== this.accounts.length;
+  }
+
+  getActiveId() {
+    this.maybeReload();
+    return this.activeId;
+  }
+
+  setActive(id) {
+    this.maybeReload();
+    const account = id ? this.get(id) : null;
+    if (id && !account) throw new Error('account not found');
+    if (account?.disabled) throw new Error('account is disabled');
+    this.activeId = account ? account.id : '';
+    this.save();
+    return this.activeId;
   }
 
   /** Round-robin over enabled accounts, skipping explicit ids. */
   pick(exclude = new Set()) {
     this.maybeReload();
+    if (this.activeId) {
+      const active = this.get(this.activeId);
+      if (active && !active.disabled && !exclude.has(active.id)) return active;
+    }
     const usable = this.accounts.filter((a) => !a.disabled && !exclude.has(a.id));
     if (usable.length === 0) return null;
     const idx = (this.cursor = ((this.cursor ?? 0) + 1) % usable.length);
@@ -112,6 +135,7 @@ export class AccountStore {
 
   pickPinned(id) {
     this.maybeReload();
+    if (this.activeId && id !== this.activeId) return null;
     const acct = this.get(id);
     if (!acct || acct.disabled) return null;
     return acct;
