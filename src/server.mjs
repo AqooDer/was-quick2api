@@ -605,7 +605,7 @@ export class QuickProxy {
       calls = limitToolCalls(calls, choice);
     }
     const refused = allowed.size > 0 && calls.length === 0 && looksLikeToolRefusal(text);
-    const malformed = allowed.size > 0 && calls.length === 0 && /<(?:client_tool_call|tool_call|function_call)>/i.test(text);
+    const malformed = allowed.size > 0 && calls.length === 0 && /<(?:client_tool_call|tool_call|function_call)(?:\s[^>]*)?>/i.test(text);
     return { text, toolCalls: calls, native, refused, malformed };
   }
 

@@ -7,9 +7,11 @@
 import crypto from 'node:crypto';
 import { byteLength, chunkByBytes, sha256Hex } from './util.mjs';
 
-const CLIENT_TAG = ['<client_tool_call>', '</client_tool_call>'];
-const GENERIC_TAG = ['<tool_call>', '</tool_call>'];
-const FUNCTION_TAG = ['<function_call>', '</function_call>'];
+const TAG_SPECS = [
+  { kind: 'client', open: /<client_tool_call(?:\s+([^>]*))?>/i, close: '</client_tool_call>' },
+  { kind: 'generic', open: /<tool_call(?:\s+([^>]*))?>/i, close: '</tool_call>' },
+  { kind: 'function', open: /<function_call(?:\s+([^>]*))?>/i, close: '</function_call>' },
+];
 
 export function hasVisibleText(s) {
   return String(s || '').replace(/[\s\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '') !== '';
@@ -510,7 +512,7 @@ export function sanitizeUpstreamMessages(messages) {
     const text = (m.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     if (looksLikeToolRefusal(text)) return false;
     // Do not replay an unparsed raw marker as an example either.
-    return !/<(?:client_tool_call|tool_call|function_call)>/i.test(text);
+    return !/<(?:client_tool_call|tool_call|function_call)(?:\s[^>]*)?>/i.test(text);
   });
 }
 
@@ -658,7 +660,7 @@ function parseLooseJson(text) {
   return null;
 }
 
-function parseToolEnvelopes(payload) {
+function parseToolEnvelopes(payload, fallbackName = '') {
   const text = String(payload || '').trim();
   if (!text) return [];
   const parsed = parseLooseJson(text);
@@ -673,6 +675,7 @@ function parseToolEnvelopes(payload) {
     }
     const { name, args } = resolveEnvelope(parsed);
     if (name || args !== undefined) return [parsed];
+    if (fallbackName) return [{ name: fallbackName, arguments: parsed }];
   }
   return [];
 }
@@ -690,11 +693,25 @@ function callsFromEnvelopes(envelopes, allowed) {
 
 function findTag(text) {
   let best = null;
-  for (const [open, close] of [CLIENT_TAG, GENERIC_TAG, FUNCTION_TAG]) {
-    const i = text.indexOf(open);
-    if (i >= 0 && (!best || i < best.start)) best = { start: i, open, close };
+  for (const spec of TAG_SPECS) {
+    const match = spec.open.exec(text);
+    if (!match) continue;
+    if (!best || match.index < best.start) {
+      best = {
+        start: match.index,
+        openText: match[0],
+        attrs: match[1] || '',
+        close: spec.close,
+        kind: spec.kind,
+      };
+    }
   }
   return best;
+}
+
+function tagToolName(attrs) {
+  const match = /\b(?:name|tool|tool_name)\s*=\s*["']([^"']+)["']/i.exec(String(attrs || ''));
+  return match ? match[1].trim() : '';
 }
 
 function extractTagged(text, allowed) {
@@ -708,13 +725,13 @@ function extractTagged(text, allowed) {
       clean += rest;
       break;
     }
-    const bodyStart = tag.start + tag.open.length;
+    const bodyStart = tag.start + tag.openText.length;
     const relEnd = rest.indexOf(tag.close, bodyStart);
     if (relEnd < 0) {
       clean += rest;
       break;
     }
-    const parsed = callsFromEnvelopes(parseToolEnvelopes(rest.slice(bodyStart, relEnd)), allowed);
+    const parsed = callsFromEnvelopes(parseToolEnvelopes(rest.slice(bodyStart, relEnd), tagToolName(tag.attrs)), allowed);
     if (parsed.length === 0) {
       const clearEnd = relEnd + tag.close.length;
       clean += rest.slice(0, clearEnd);

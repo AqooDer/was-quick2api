@@ -276,3 +276,21 @@ test('repairs a tool call missing the final root brace', () => {
   assert.equal(JSON.parse(parsed.calls[0].arguments).command, 'echo hi');
   assert.equal(parsed.text, '');
 });
+
+test('accepts tool name in the opening tag with an arguments-only body', () => {
+  const raw = `<client_tool_call name="Bash">
+{"command":"cd /tmp && echo hi","description":"test"}
+</client_tool_call>`;
+  const parsed = parseClientToolCalls(raw, new Set(['Bash']));
+  assert.equal(parsed.calls.length, 1);
+  assert.equal(parsed.calls[0].name, 'Bash');
+  assert.equal(JSON.parse(parsed.calls[0].arguments).command, 'cd /tmp && echo hi');
+  assert.equal(parsed.text, '');
+});
+
+test('accepts single-quoted name attributes', () => {
+  const raw = `<client_tool_call name='Read'>{"file_path":"/tmp/a"}</client_tool_call>`;
+  const parsed = parseClientToolCalls(raw, new Set(['Read']));
+  assert.equal(parsed.calls.length, 1);
+  assert.equal(parsed.calls[0].name, 'Read');
+});
