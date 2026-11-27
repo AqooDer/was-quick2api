@@ -387,6 +387,13 @@ QUICK2API_LOG=debug node bin/quick2api.mjs serve
 
 **不想在 Quick 聊天列表看到 setup 轮**：目前无法完全避免；可关闭 `session_reuse` 之外的选项没有帮助。每个新会话都会预热一次。
 
+**Bash 显示 `Not run · auto mode's check had no usable answer`**
+
+- 这不是 Quick 额度或工具调用失败，而是 Claude Code 的 auto 模式安全检查无法评估命令。
+- 典型日志：主请求之后出现 `messages=1 system_bytes=142500 tools=0 stream=false`，且没有对应的 `chat done`。
+- 长会话会把完整 transcript 放进检查请求，超过检查上下文后就会拿不到结论，Bash 被标成 `Not run`。
+- 处理：在 Claude Code 里执行 `/compact` 缩短会话；或 `/permissions` 给这些命令加 allow 规则；信任的项目也可以用 `--dangerously-skip-permissions`。只改代理没用。
+
 ## 12.1 在 Claude Code 里发图片
 
 支持两种方式：
@@ -623,59 +630,6 @@ export QUICK2API_ADMIN_PASSWORD='一个至少 12 位的密码'
 浏览器自动模式只监听 loopback，不会把回调端口暴露到局域网。登录流程 30 分钟过期；失败或超时会自动关闭监听。
 
 ### 17.5 切换后的验证
-
-```bash
-node bin/quick2api.mjs accounts   # * 标记当前账号
-node bin/quick2api.mjs doctor     # 会优先使用当前/可用账号
-```
-
-Claude Code 和 CC Switch 的配置不用改，仍然通过 `127.0.0.1:15721 → 127.0.0.1:8080` 访问。
-
-## 18. 致谢与许可## 17. Web 管理台（账号 / 额度 / 切换）
-
-启动服务后打开：
-
-```text
-http://127.0.0.1:8080/admin
-```
-
-管理台与推理 API 共用端口，不需要 Node 构建，也没有外部前端资源。
-
-### 17.1 管理密码
-
-推荐启动前设置：
-
-```bash
-export QUICK2API_ADMIN_PASSWORD='一个至少 12 位的密码'
-```
-
-也可以写在 `config.json` 的 `admin_password`（不建议把密码提交到仓库）。不设置密码时，管理台**只允许本机 loopback 访问**；不要把 8080 直接暴露到公网。
-
-### 17.2 账号管理
-
-账号卡片支持：
-
-- **设为当前**：只使用该账号；切换立即生效，**不需要重启服务**
-- **禁用 / 启用**：保留账号但不参与轮询；旧账号额度用完时建议禁用
-- **查额度**：读取 Quick 官方 `profile/usage`，显示月度分钟数、会话额度、重置时间和套餐
-- **刷新 token**：手动刷新 OAuth token
-- **删除**：只删本地 `accounts.json`，不会登出 Quick 账号
-
-设置了“当前账号”后，会话复用只固定在该账号；如果某个旧 thread 属于别的账号，会自动新建 thread，不会把请求发到旧账号。
-
-### 17.3 登录新账号（网页向导）
-
-1. 打开管理台，滚到 **登录新账号**
-2. 选择 `provider` / `stage`（企业 SSO 填 `region`），点 **开始登录**
-3. 浏览器打开页面给出的 **discovery URL**，完成登录
-4. 浏览器会跳到 `localhost:18080/callback?...`；页面打不开是正常的，复制地址栏**完整 URL** 粘回页面，点继续
-5. 页面给出 **authorize URL**，在同一浏览器打开并登录
-6. 浏览器跳到 `127.0.0.1:18080/?code=...`；同样复制完整 URL 粘回页面，点继续
-7. 登录完成后账号自动写入 `accounts.json`，并**自动设为当前账号**
-
-整个过程不需要服务器开放回调端口；回调页面打不开不影响复制 URL。
-
-### 17.4 切换后的验证
 
 ```bash
 node bin/quick2api.mjs accounts   # * 标记当前账号
