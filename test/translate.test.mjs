@@ -294,3 +294,8 @@ test('accepts single-quoted name attributes', () => {
   assert.equal(parsed.calls.length, 1);
   assert.equal(parsed.calls[0].name, 'Read');
 });
+
+test('detects cloud-surface refusals to access the local machine', () => {
+  const text = '这一轮我没法动你的文件：我现在在云端运行，连不到你的 Mac，读不到也写不了。请用 AWS Quick 桌面端打开这个对话。';
+  assert.equal(looksLikeToolRefusal(text), true);
+});

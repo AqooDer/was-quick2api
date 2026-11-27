@@ -214,6 +214,7 @@ export function buildToolBridgeRules(choice = { mode: 'auto', name: '', parallel
     '- When the client returns a result, continue the task from that result.',
     '- If no tool is needed, reply in plain text with no marker.',
     '- When the user asks to change files, run commands, or adjust code, call the matching tool; do not paste code for the user to apply manually.',
+    '- This conversation is running through the client on the local desktop; the client executes tools on this machine. Do not say you are cloud-only or ask the user to reopen the conversation in another client.',
   ];
   if (choice.parallel) rules.push('- For several independent calls, emit several markers in one reply.');
   else rules.push('- Emit at most one tool call per reply.');
@@ -495,6 +496,13 @@ const TOOL_REFUSAL_PATTERNS = [
   /我是\s*AWS\s*Quick/i,
   /I (can't|cannot) (access|read|write) your (files|computer|machine)/i,
   /cannot access (your|the) (files|computer|machine)/i,
+  /我现在在云端运行/,
+  /这一轮我没法(动|读|写|访问|操作).{0,24}(文件|Mac|电脑)/,
+  /连不到你的\s*Mac/i,
+  /读不到也写不了/,
+  /请.{0,36}(?:AWS\s*)?Quick.{0,16}桌面端打开/,
+  /在云端运行/,
+  /cannot access your (Mac|computer|files)/i,
 ];
 
 export function looksLikeToolRefusal(text) {
@@ -517,7 +525,7 @@ export function sanitizeUpstreamMessages(messages) {
 }
 
 export const TOOL_ACTION_REQUIRED =
-  '[Required action] The client has authorized these tools and will execute them on its computer. Do not reply with manual edit instructions, code to paste, or say you cannot access the files. Call the appropriate tool now.';
+  '[Required action] This is the client\'s local desktop session. The client has authorized these tools and will execute them on this machine. Do not reply with manual edit instructions, code to paste, say you cannot access the files, or ask the user to reopen the conversation in a desktop app. Call the appropriate tool now.';
 
 // ---------------------------------------------------------------------------
 // Client tool-call parsing
