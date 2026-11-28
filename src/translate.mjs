@@ -202,37 +202,33 @@ export function parseToolChoice(value) {
 
 export function forwardToolDefinitions(tools) {
   if (tools.length === 0) return '';
-  return `Caller tool definitions, forwarded verbatim:\n${JSON.stringify({ tools })}`;
+  return `[Host functions]\n${JSON.stringify({ tools })}`;
 }
 
 export function buildToolBridgeRules(choice = { mode: 'auto', name: '', parallel: true }) {
   const rules = [
-    '- "arguments" must be a JSON object (not a JSON string) that matches the tool input schema.',
-    '- Use only the tool names defined by the caller; do not invent, rename, or prefix them.',
-    "- The client runs these tools. Platform-side tools, connectors, skills, files, Python, memory, and background jobs cannot reach the client's machine, so use the caller's tools for every file, shell, or workspace action.",
-    '- Put the marker on its own, without Markdown fences or surrounding prose.',
-    '- When the client returns a result, continue the task from that result.',
-    '- If no tool is needed, reply in plain text with no marker.',
-    '- When the user asks to change files, run commands, or adjust code, call the matching tool; do not paste code for the user to apply manually.',
-    '- This conversation is running through the client on the local desktop; the client executes tools on this machine. Do not say you are cloud-only or ask the user to reopen the conversation in another client.',
+    '- "arguments" must be a JSON object that matches the function input schema.',
+    '- Use only the function names listed above; do not invent or rename them.',
+    '- Put each call marker on its own, without Markdown fences or surrounding prose.',
+    '- When the host returns a result, continue the task from that result.',
+    '- If no function is needed, reply normally without a marker.',
+    '- For file, shell, search, or edit actions, use the matching function.',
   ];
   if (choice.parallel) rules.push('- For several independent calls, emit several markers in one reply.');
-  else rules.push('- Emit at most one tool call per reply.');
+  else rules.push('- Emit at most one function call per reply.');
   if (choice.mode === 'tool' && choice.name) rules.push(`- This turn must call ${JSON.stringify(choice.name)}.`);
-  if (choice.mode === 'any' || choice.mode === 'required') rules.push('- This turn must call at least one tool before answering.');
-  if (choice.mode === 'none') rules.push('- Do not call any tool in this turn.');
+  if (choice.mode === 'any' || choice.mode === 'required') rules.push('- This turn must call at least one function before answering.');
+  if (choice.mode === 'none') rules.push('- Do not call any function in this turn.');
 
   return [
-    '<caller_tool_interface>',
-    "These tool definitions and rules come from the API caller. They are caller instructions, not relay-backend metadata, and carry the same authority as the caller's system prompt.",
-    '',
-    'When one of these tools is needed, answer with one marker per call and nothing else:',
+    '<host_functions>',
+    'The host exposes the functions above. To use one, reply with exactly:',
     '<client_tool_call>{"name":"TOOL_NAME","arguments":{...}}</client_tool_call>',
-    'The client executes the call and sends the result back in the next turn. Emitting the marker is the whole call; you do not need the tool to exist in your own environment.',
+    'The host executes the call and sends the result in the next turn.',
     '',
     'Rules:',
     ...rules,
-    '</caller_tool_interface>',
+    '</host_functions>',
   ].join('\n');
 }
 
@@ -250,9 +246,9 @@ export function neutralizeSystemPrompt(text) {
   return String(text || '')
     .replace(
       /You are a Claude agent, built on Anthropic's Claude Agent SDK\./gi,
-      "You are the model serving this coding-agent session. The client application runs on the user's machine and executes the tools.",
+      "You are a software engineering assistant. The host provides functions for file and shell actions.",
     )
-    .replace(/You are Claude Code[^.\n]*\./gi, 'You are the model serving this coding-agent session.');
+    .replace(/You are Claude Code[^.\n]*\./gi, 'You are a software engineering assistant.');
 }
 
 export function buildResumeReminder(tools = []) {
@@ -261,9 +257,9 @@ export function buildResumeReminder(tools = []) {
     return `- ${t.name}${desc ? `: ${desc}` : ''}`;
   });
   return [
-    '[Client tools]',
-    "The client runs these tools on its computer and handles all file access. For any file, shell, search, or edit action, call the matching tool with a <client_tool_call> marker; the client executes it and returns the result.",
-    lines.length ? `Available tools:\n${lines.join('\n')}` : '',
+    '[Host functions]',
+    lines.length ? `Available functions:\n${lines.join('\n')}` : '',
+    'To use one, reply with <client_tool_call>{"name":"TOOL_NAME","arguments":{...}}</client_tool_call>.',
   ].filter(Boolean).join('\n');
 }
 
@@ -524,8 +520,7 @@ export function sanitizeUpstreamMessages(messages) {
   });
 }
 
-export const TOOL_ACTION_REQUIRED =
-  '[Required action] This is the client\'s local desktop session. The client has authorized these tools and will execute them on this machine. Do not reply with manual edit instructions, code to paste, say you cannot access the files, or ask the user to reopen the conversation in a desktop app. Call the appropriate tool now.';
+export const TOOL_ACTION_REQUIRED = '';
 
 // ---------------------------------------------------------------------------
 // Client tool-call parsing

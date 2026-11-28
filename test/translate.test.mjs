@@ -85,7 +85,7 @@ test('planTurns splits an oversized transcript', () => {
 
 test('tool bridge includes the schema and protocol', () => {
   const prompt = buildToolBridgePrompt(tools, parseToolChoice({ type: 'auto' }));
-  assert.match(prompt, /<caller_tool_interface>/);
+  assert.match(prompt, /<host_functions>/);
   assert.match(prompt, /"name":"Bash"/);
   assert.match(prompt, /<client_tool_call>/);
 });
@@ -184,12 +184,12 @@ test('system/developer messages are promoted to instructions', () => {
 test('system identity is neutralized for the upstream agent', () => {
   const neutral = neutralizeSystemPrompt("You are a Claude agent, built on Anthropic's Claude Agent SDK.\nFollow the rules.");
   assert.doesNotMatch(neutral, /built on Anthropic's Claude Agent SDK/);
-  assert.match(neutral, /model serving this coding-agent session/);
+  assert.match(neutral, /software engineering assistant/);
 });
 
 test('resume reminder restates the tool contract', () => {
   const reminder = buildResumeReminder([{ name: 'Bash' }, { name: 'Read' }]);
-  assert.match(reminder, /client runs these tools on its computer/);
+  assert.match(reminder, /Available functions/);
   assert.match(reminder, /<client_tool_call>/);
   assert.match(reminder, /- Bash[\s\S]*- Read/);
 });
@@ -255,18 +255,6 @@ test('drops prior tool-refusal assistant messages from the upstream transcript',
   const clean = sanitizeUpstreamMessages(messages);
   assert.equal(clean.length, 2);
   assert.equal(clean.some((m) => m.role === 'assistant'), false);
-});
-
-test('required-action suffix is the last thing the model reads', () => {
-  assert.match(TOOL_ACTION_REQUIRED, /Call the appropriate tool now/);
-  const turns = planTurns({
-    instructions: 'SYSTEM',
-    transcript: 'do it',
-    suffix: TOOL_ACTION_REQUIRED,
-    maxBytes: 63_488,
-    chunkBytes: 49_152,
-  });
-  assert.match(turns.at(-1), /do it[\s\S]*Required action/);
 });
 
 test('repairs a tool call missing the final root brace', () => {

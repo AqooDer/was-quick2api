@@ -195,7 +195,7 @@ test('reuses the upstream thread when only the system prompt changes', async () 
     const delta = stack.mock.userMessages.at(-1);
     assert.match(delta, /continue/);
     assert.doesNotMatch(delta, /dynamic date/);
-    assert.match(delta, /\[Client tools\]/);
+    assert.match(delta, /\[Host functions\]/);
   } finally {
     await stack.close();
   }

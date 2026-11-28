@@ -216,7 +216,7 @@ export class QuickProxy {
       finalParts.push({ title: 'tool calling protocol', text: rules });
     }
     const finalPrefix = [
-      tools.length > 0 ? 'The client application runs these tools on its computer. Use a <client_tool_call> marker for any file, shell, search, or edit action.' : '',
+      tools.length > 0 ? 'Host functions are available for file and shell actions.' : '',
       '[The session instructions were provided in the setup turns above. Follow them for this turn.]',
     ].filter(Boolean).join('\n\n');
     const allowed = toolNameSet(tools);
